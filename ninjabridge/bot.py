@@ -123,7 +123,7 @@ async def setup(i: discord.Interaction, session_id: str, relay_targets: str = "t
     await i.response.send_message("SSN session and relay targets saved.", ephemeral=True)
 
 
-forward_group = app_commands.Group(name="forward", description="Forward Discord channels to SSN", default_permissions=discord.Permissions(administrator=True))
+forward_group = app_commands.Group(name="forward", description="Choose Discord channels to forward to SSN", default_permissions=discord.Permissions(administrator=True))
 
 
 @forward_group.command(name="add")
@@ -147,24 +147,24 @@ async def channel_clear(i: discord.Interaction) -> None:
 
 
 bot.tree.add_command(forward_group)
-mirror_group = app_commands.Group(name="mirror", description="Mirror SSN platform chat into Discord", default_permissions=discord.Permissions(administrator=True))
+receive_group = app_commands.Group(name="receive", description="Choose where Discord receives SSN platform messages", default_permissions=discord.Permissions(administrator=True))
 
 
-@mirror_group.command(name="set")
+@receive_group.command(name="set")
 async def relay_set(i: discord.Interaction, channel: discord.TextChannel) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", str(channel.id))
     await i.response.send_message(f"SSN platform messages will now be mirrored to {channel.mention}.", ephemeral=True)
 
 
-@mirror_group.command(name="clear")
+@receive_group.command(name="clear")
 async def relay_clear(i: discord.Interaction) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", None)
     await i.response.send_message("SSN-to-Discord mirroring disabled.", ephemeral=True)
 
 
-bot.tree.add_command(mirror_group)
+bot.tree.add_command(receive_group)
 identity_group = app_commands.Group(name="identity", description="Manage cross-platform identities", default_permissions=discord.Permissions(administrator=True))
 
 

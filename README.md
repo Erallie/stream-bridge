@@ -28,13 +28,13 @@ Do not run a second independent relay system. SSN owns platform-to-platform rela
 ## Core commands
 
 - `/setup session_id relay_targets` connects SSN and sets destinations for Discord-originated messages.
-- `/forward add`, `/forward remove`, and `/forward clear` manage normal text channels and voice-channel side chats forwarded from Discord into SSN.
-- `/mirror set` and `/mirror clear` select or clear the Discord text channel receiving identity-aware platform messages from SSN.
+- `/forward add`, `/forward remove`, and `/forward clear` manage the Discord text channels and voice-channel side chats forwarded into SSN.
+- `/receive set` and `/receive clear` select or clear the Discord text channel that receives identity-aware platform messages from SSN.
 - `/identity link|list` maps stable platform user IDs to a canonical name, avatar, and owner flag.
 - `/status` shows the current configuration with a masked session ID.
 - `/disable` disconnects SSN while retaining other settings.
 
-The direction words are intentional: **forward** means Discord → SSN, while **mirror** means SSN → Discord. Both features are optional and may be enabled independently.
+The direction words describe Discord's role: **forward** means Discord → SSN, while **receive** means SSN → Discord. Both features are optional and may be enabled independently.
 
 ## Optional NinjaMind companion
 
