@@ -22,6 +22,15 @@ class ConfigStoreTests(unittest.TestCase):
                 GuildConfig("guild-1", ("channel-1", "channel-2"), "session-one", ("twitch", "youtube")),
             )
             self.assertEqual(store.get("guild-2").session_id, "session-two")
+            store.link_identity("guild-1", "youtube", "UC123", "Erallie", "https://example/avatar.png", True)
+            identity = store.resolve_identity("guild-1", "youtube", "UC123", "fallback")
+            self.assertEqual(identity["display_name"], "Erallie")
+            self.assertEqual(identity["owner"], 1)
+            event = store.claim_event("guild-1", "youtube", "message-1", "UC123", "Hello", 1)
+            self.assertIsNotNone(event)
+            self.assertIsNone(store.claim_event("guild-1", "youtube", "message-1", "UC123", "Hello", 1))
+            self.assertTrue(store.claim_delivery("guild-1", event, "discord"))
+            self.assertFalse(store.claim_delivery("guild-1", event, "discord"))
             store.close()
 
 

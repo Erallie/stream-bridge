@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
+from typing import Any
 
 import discord
 from discord import app_commands
@@ -10,18 +12,14 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from ninjabridge.database import ConfigStore, GuildConfig
-from ninjabridge.messages import to_ssn_message
+from ninjabridge.messages import to_relay_text, to_ssn_message
 from ninjabridge.ssn import SsnClient
 
 load_dotenv()
 
-def parse_relay_targets(value: str | None) -> list[str]:
-    targets: list[str] = []
-    for item in (value or "").split(","):
-        target = item.strip().lower()
-        if target and target != "discord" and target.replace("-", "").replace("_", "").isalnum() and target not in targets:
-            targets.append(target)
-    return targets
+
+def parse_list(value: str | None) -> list[str]:
+    return list(dict.fromkeys(x.strip().lower() for x in (value or "").split(",") if x.strip()))
 
 
 class NinjaBridge(commands.Bot):
@@ -30,8 +28,7 @@ class NinjaBridge(commands.Bot):
         intents.guilds = True
         intents.guild_messages = True
         intents.message_content = True
-        super().__init__(command_prefix=commands.when_mentioned, intents=intents,
-                         application_id=int(os.environ["DISCORD_CLIENT_ID"]))
+        super().__init__(command_prefix=commands.when_mentioned, intents=intents, application_id=int(os.environ["DISCORD_CLIENT_ID"]))
         self.store = ConfigStore(os.getenv("DATABASE_PATH", "./data/bot.sqlite"))
         self.ssn_clients: dict[int, SsnClient] = {}
         self.ssn_url = os.getenv("SSN_WEBSOCKET_URL", "wss://io.socialstream.ninja")
@@ -42,10 +39,13 @@ class NinjaBridge(commands.Bot):
             guild = discord.Object(id=int(guild_id))
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-            logging.info("Registered commands in development server %s", guild_id)
         else:
             await self.tree.sync()
-            logging.info("Registered global commands")
+
+    async def on_ready(self) -> None:
+        logging.info("NinjaBridge ready as %s", self.user)
+        for config in self.store.configured_guilds():
+            self.get_ssn(int(config.guild_id), config)
 
     async def reset_ssn(self, guild_id: int) -> None:
         client = self.ssn_clients.pop(guild_id, None)
@@ -54,11 +54,55 @@ class NinjaBridge(commands.Bot):
 
     def get_ssn(self, guild_id: int, config: GuildConfig) -> SsnClient:
         if guild_id not in self.ssn_clients:
-            adapter = logging.LoggerAdapter(logging.getLogger("ninjabridge.ssn"), {"guild_id": guild_id})
-            client = SsnClient(self.ssn_url, config.session_id or "", config.relay_targets, adapter)
-            client.start()
-            self.ssn_clients[guild_id] = client
+            async def received(data: dict[str, Any]) -> None:
+                await self.handle_ssn(guild_id, data)
+            logger = logging.LoggerAdapter(logging.getLogger("ninjabridge.ssn"), {"guild_id": guild_id})
+            self.ssn_clients[guild_id] = SsnClient(self.ssn_url, config.session_id or "", config.relay_targets, logger, received)
+            self.ssn_clients[guild_id].start()
         return self.ssn_clients[guild_id]
+
+    async def handle_ssn(self, guild_id: int, data: dict[str, Any]) -> None:
+        if data.get("reflection") or data.get("bot") or not data.get("chatname") or not data.get("chatmessage"):
+            return
+        platform = str(data.get("type", "unknown")).lower()
+        user_id = str(data.get("userid") or data.get("chatname", ""))
+        key = self.store.claim_event(str(guild_id), platform, str(data.get("id", "")), user_id, str(data["chatmessage"]), data.get("timestamp", int(time.time())))
+        if not key:
+            return
+        identity = self.store.resolve_identity(str(guild_id), platform, user_id, str(data["chatname"]), str(data.get("chatimg", "")))
+        config = self.store.get(str(guild_id))
+        if config and config.discord_relay_channel_id and self.store.claim_delivery(str(guild_id), key, "discord"):
+            await self.send_webhook(guild_id, int(config.discord_relay_channel_id), identity, platform, str(data["chatmessage"]))
+
+    async def send_webhook(self, guild_id: int, channel_id: int, identity: dict[str, Any], platform: str, content: str) -> None:
+        guild = self.get_guild(guild_id)
+        channel = guild.get_channel(channel_id) if guild else None
+        if not isinstance(channel, discord.TextChannel):
+            return
+        hooks = await channel.webhooks()
+        hook = next((h for h in hooks if h.name == "NinjaBridge"), None)
+        if not hook:
+            hook = await channel.create_webhook(name="NinjaBridge", reason="Cross-platform relay")
+        await hook.send(content, username=f"{identity['display_name']} ({platform.title()})"[:80], avatar_url=identity.get("avatar_url") or None, allowed_mentions=discord.AllowedMentions.none(), wait=True)
+
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot or message.webhook_id or not message.guild:
+            return
+        guild_id = str(message.guild.id)
+        config = self.store.get(guild_id)
+        if not config or str(message.channel.id) not in config.channel_ids:
+            return
+        payload = to_ssn_message(message)
+        if not config.session_id or not (payload["chatmessage"] or payload["contentimg"]):
+            return
+        key = self.store.claim_event(guild_id, "discord", str(message.id), str(message.author.id), payload["chatmessage"], int(message.created_at.timestamp()))
+        if not key:
+            return
+        ssn = self.get_ssn(message.guild.id, config)
+        await ssn.inject(payload)
+        for target in config.relay_targets:
+            if self.store.claim_delivery(guild_id, key, target):
+                await ssn.send_chat(target, to_relay_text(payload))
 
     async def close(self) -> None:
         await asyncio.gather(*(client.close() for client in self.ssn_clients.values()), return_exceptions=True)
@@ -67,101 +111,104 @@ class NinjaBridge(commands.Bot):
 
 
 bot = NinjaBridge()
-admin_only = app_commands.default_permissions(administrator=True)
+admin = app_commands.default_permissions(administrator=True)
 
 
 @bot.tree.command(name="setup", description="Connect this server to Social Stream Ninja")
-@admin_only
-@app_commands.describe(session_id="Session value from your SSN URL", relay_targets="Optional: twitch,youtube,kick")
-async def setup(interaction: discord.Interaction, session_id: str, relay_targets: str | None = None) -> None:
-    assert interaction.guild_id is not None
-    targets = parse_relay_targets(relay_targets)
-    bot.store.set_session(str(interaction.guild_id), session_id.strip(), targets)
-    await bot.reset_ssn(interaction.guild_id)
-    await interaction.response.send_message(
-        f"SSN session saved. Relay fallback: {', '.join(targets) or 'off'}.", ephemeral=True
-    )
+@admin
+async def setup(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok") -> None:
+    assert i.guild_id
+    bot.store.set_session(str(i.guild_id), session_id.strip(), parse_list(relay_targets))
+    await bot.reset_ssn(i.guild_id)
+    await i.response.send_message("SSN session and relay targets saved.", ephemeral=True)
 
 
-channel_group = app_commands.Group(name="channel", description="Manage channels forwarded to Social Stream Ninja",
-                                   default_permissions=discord.Permissions(administrator=True))
+channel_group = app_commands.Group(name="channel", description="Manage channels sent to SSN", default_permissions=discord.Permissions(administrator=True))
 
 
-@channel_group.command(name="add", description="Add a text channel or voice-channel side chat")
-async def channel_add(interaction: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
-    assert interaction.guild_id is not None
-    changed = bot.store.add_channel(str(interaction.guild_id), str(channel.id))
-    text = f"Added {channel.mention}." if changed else f"{channel.mention} is already configured."
-    await interaction.response.send_message(text, ephemeral=True)
+@channel_group.command(name="add")
+async def channel_add(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
+    assert i.guild_id
+    changed = bot.store.add_channel(str(i.guild_id), str(channel.id))
+    await i.response.send_message("Channel added." if changed else "Already configured.", ephemeral=True)
 
 
-@channel_group.command(name="remove", description="Remove one configured channel")
-async def channel_remove(interaction: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
-    assert interaction.guild_id is not None
-    changed = bot.store.remove_channel(str(interaction.guild_id), str(channel.id))
-    text = f"Removed {channel.mention}." if changed else f"{channel.mention} was not configured."
-    await interaction.response.send_message(text, ephemeral=True)
+@channel_group.command(name="remove")
+async def channel_remove(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
+    assert i.guild_id
+    changed = bot.store.remove_channel(str(i.guild_id), str(channel.id))
+    await i.response.send_message("Channel removed." if changed else "Not configured.", ephemeral=True)
 
 
-@channel_group.command(name="clear", description="Remove all configured channels")
-async def channel_clear(interaction: discord.Interaction) -> None:
-    assert interaction.guild_id is not None
-    count = bot.store.clear_channels(str(interaction.guild_id))
-    await interaction.response.send_message(f"Removed {count} configured channel(s).", ephemeral=True)
+@channel_group.command(name="clear")
+async def channel_clear(i: discord.Interaction) -> None:
+    assert i.guild_id
+    await i.response.send_message(f"Removed {bot.store.clear_channels(str(i.guild_id))} channel(s).", ephemeral=True)
 
 
 bot.tree.add_command(channel_group)
+relay_group = app_commands.Group(name="relay-channel", description="Configure the platform-to-Discord mirror", default_permissions=discord.Permissions(administrator=True))
 
 
-@bot.tree.command(name="status", description="Show this server's NinjaBridge configuration")
-@admin_only
-async def status(interaction: discord.Interaction) -> None:
-    assert interaction.guild_id is not None
-    config = bot.store.get(str(interaction.guild_id))
-    channels = ", ".join(f"<#{channel_id}>" for channel_id in config.channel_ids) if config and config.channel_ids else "none"
-    session = "not set"
-    if config and config.session_id:
-        session = config.session_id[:3] + "•" * min(8, max(0, len(config.session_id) - 3))
-    targets = ", ".join(config.relay_targets) if config and config.relay_targets else "off"
-    await interaction.response.send_message(
-        f"Channels: {channels}\nSession: {session}\nRelay fallback: {targets}", ephemeral=True
-    )
+@relay_group.command(name="set")
+async def relay_set(i: discord.Interaction, channel: discord.TextChannel) -> None:
+    assert i.guild_id
+    bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", str(channel.id))
+    await i.response.send_message(f"Platform messages will be mirrored to {channel.mention}.", ephemeral=True)
 
 
-@bot.tree.command(name="disable", description="Remove this server's SSN session and stop forwarding")
-@admin_only
-async def disable(interaction: discord.Interaction) -> None:
-    assert interaction.guild_id is not None
-    bot.store.clear_session(str(interaction.guild_id))
-    await bot.reset_ssn(interaction.guild_id)
-    await interaction.response.send_message("SSN forwarding is disabled for this server.", ephemeral=True)
+@relay_group.command(name="clear")
+async def relay_clear(i: discord.Interaction) -> None:
+    assert i.guild_id
+    bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", None)
+    await i.response.send_message("Discord mirror disabled.", ephemeral=True)
 
 
-@bot.event
-async def on_ready() -> None:
-    logging.info("NinjaBridge is ready as %s", bot.user)
+bot.tree.add_command(relay_group)
+identity_group = app_commands.Group(name="identity", description="Manage cross-platform identities", default_permissions=discord.Permissions(administrator=True))
 
 
-@bot.event
-async def on_message(message: discord.Message) -> None:
-    if not message.guild or message.author.bot or message.webhook_id:
-        return
-    config = bot.store.get(str(message.guild.id))
-    if not config or not config.session_id or str(message.channel.id) not in config.channel_ids:
-        return
-    payload = to_ssn_message(message)
-    if not payload["chatmessage"] and not payload["contentimg"]:
-        return
-    await bot.get_ssn(message.guild.id, config).publish(payload)
-    logging.info("Forwarded Discord message %s from guild %s", message.id, message.guild.id)
+@identity_group.command(name="link")
+async def identity_link(i: discord.Interaction, platform: str, user_id: str, display_name: str, avatar_url: str = "", owner: bool = False, handle: str = "") -> None:
+    assert i.guild_id
+    bot.store.link_identity(str(i.guild_id), platform, user_id, display_name, avatar_url, owner, handle)
+    await i.response.send_message(f"Linked {platform}:{user_id} to {display_name}.", ephemeral=True)
+
+
+@identity_group.command(name="list")
+async def identity_list(i: discord.Interaction) -> None:
+    assert i.guild_id
+    rows = bot.store.identity_summary(str(i.guild_id))
+    text = "\n".join(f"{r['display_name']} ← {r['platform']}:{r['platform_user_id']}" for r in rows) or "No identities."
+    await i.response.send_message(text[:1900], ephemeral=True)
+
+
+bot.tree.add_command(identity_group)
+
+
+@bot.tree.command(name="status", description="Show NinjaBridge configuration")
+@admin
+async def status(i: discord.Interaction) -> None:
+    assert i.guild_id
+    c = bot.store.get(str(i.guild_id))
+    session = c.session_id[:3] + "••••••" if c and c.session_id else "not set"
+    channels = ", ".join(f"<#{x}>" for x in c.channel_ids) if c else "none"
+    mirror = f"<#{c.discord_relay_channel_id}>" if c and c.discord_relay_channel_id else "off"
+    await i.response.send_message(f"Channels: {channels}\nSession: {session}\nDiscord mirror: {mirror}", ephemeral=True)
+
+
+@bot.tree.command(name="disable", description="Disable SSN forwarding")
+@admin
+async def disable(i: discord.Interaction) -> None:
+    assert i.guild_id
+    bot.store.clear_session(str(i.guild_id))
+    await bot.reset_ssn(i.guild_id)
+    await i.response.send_message("SSN forwarding disabled.", ephemeral=True)
 
 
 def main() -> None:
-    missing = [name for name in ("DISCORD_TOKEN", "DISCORD_CLIENT_ID") if not os.getenv(name)]
+    missing = [x for x in ("DISCORD_TOKEN", "DISCORD_CLIENT_ID") if not os.getenv(x)]
     if missing:
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
-    logging.basicConfig(
-        level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+        raise RuntimeError("Missing: " + ", ".join(missing))
+    logging.basicConfig(level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s %(message)s")
     bot.run(os.environ["DISCORD_TOKEN"], log_handler=None)
