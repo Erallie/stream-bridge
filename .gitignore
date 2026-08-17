@@ -1,5 +1,14 @@
-node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+bot-env/
 .env
 data/
 *.log
-npm-debug.log*
+dist/
+build/
+*.egg-info/

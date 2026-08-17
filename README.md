@@ -1,46 +1,48 @@
 # NinjaBridge
 
-Bridge Discord chat into Social Stream Ninja.
+Bridge Discord chat into Social Stream Ninja. NinjaBridge supports multiple Discord servers, multiple configured channels per server, normal text channels, and voice-channel side chats.
 
-A multi-server Discord bot that forwards an administrator-selected text channel or voice-channel side chat into each server's own Social Stream Ninja (SSN) session.
+## Requirements
 
-## Bot-owner setup
+- Python 3.11 or newer
+- A Discord bot with **Message Content Intent** enabled
+- Discord OAuth scopes `bot` and `applications.commands`
+- **View Channels** and **Read Message History** in each forwarded channel
 
-1. Install Node.js 20 or newer.
-2. Create a bot in the [Discord Developer Portal](https://discord.com/developers/applications), enable **Message Content Intent**, and invite it with the `bot` and `applications.commands` scopes.
-3. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN` and `DISCORD_CLIENT_ID`.
-4. Run `npm install`, then `npm start`.
+## Installation
 
-`DISCORD_GUILD_ID` is useful during development because commands appear immediately in that server. Remove it for a public bot using global commands.
+    python -m venv .venv
+    .venv\Scripts\activate
+    python -m pip install -r requirements.txt
+    copy .env.example .env
 
-## Setup for each Discord server
+Fill in `DISCORD_TOKEN` and `DISCORD_CLIENT_ID`, then run:
 
-Only administrators can use these commands, and every response is private:
+    python -m ninjabridge
 
-- `/setup session-id:YOUR_SESSION_ID` saves that server's SSN session. Optionally provide `relay-targets:twitch,youtube,kick`.
-- `/channel add channel:#your-channel` adds a normal text channel or voice-channel side chat. Run it again to add more channels.
-- `/channel remove channel:#your-channel` removes one configured channel.
-- `/channel clear` removes all configured channels.
-- `/status` shows every configured channel, a masked session ID, and current relay settings.
-- `/disable` removes the session ID and stops forwarding while retaining the channel list.
+On macOS or Linux, activate the environment with `source .venv/bin/activate` instead.
 
-In SSN, enable **remote API control** and open the matching dock/overlay in server mode, such as `?session=YOUR_ID&server`.
+## Commands
 
-Configuration is stored in `data/bot.sqlite`, a SQLite database excluded from Git. It holds Discord server IDs, selected channel IDs, SSN session IDs, and relay target names.
+- `/setup session-id:YOUR_SESSION_ID` saves the server's SSN session. `relay-targets` is optional.
+- `/channel add` adds a normal text channel or a voice-channel side chat. Repeat for multiple channels.
+- `/channel remove` removes one channel.
+- `/channel clear` removes every configured channel.
+- `/status` privately displays the current channels, masked session ID, and relay targets.
+- `/disable` removes the SSN session and stops forwarding while retaining the channel list.
 
-## Why there is no password command
+Only Discord administrators can use these commands. Responses are ephemeral.
 
-SSN has an optional password for its peer-to-peer VDO.Ninja transport. The documented SSN server/WebSocket API used by this bot joins with the session ID and has no password field. Asking for and storing that password would therefore add risk without authenticating this integration. Treat the session ID as a secret because the SSN API currently relies on it.
+In SSN, enable **remote API control** and open the matching dock or overlay in server mode, such as `?session=YOUR_ID&server`.
 
-## Relay-chat behavior
+## Data and passwords
 
-SSN API `extContent` reaches overlays, but SSN's current `relayall` path requires a captured source browser tab. API-injected Discord messages have no source tab. If relay is wanted, administrators can set `relay-targets` during `/ssn setup`; the bot issues SSN `sendChat` commands to those SSN-connected platforms and stores no platform credentials.
+Configuration is stored in `data/bot.sqlite`. The existing Node.js database schema is supported and single-channel entries are migrated automatically.
 
-## Reliability and verification
+SSN's WebSocket server API uses the session ID and has no password field. SSN's optional password applies to its peer-to-peer transport, so NinjaBridge does not request or store it. Treat the session ID as a secret.
 
-- Uses native-looking SSN Discord message fields through `extContent`.
-- Uses one reconnecting SSN connection per active Discord server, heartbeat pings, exponential backoff, and bounded queues.
-- Ignores bot and webhook messages to prevent loops.
-- Run `npm run check` and `npm test` before deployment.
+## Tests
+
+    python -m unittest discover -s tests -v
 
 Sources: [SSN API](https://github.com/steveseguin/social_stream/blob/main/api.md), [Discord adapter](https://github.com/steveseguin/social_stream/blob/main/sources/discord.js), and [message/relay processing](https://github.com/steveseguin/social_stream/blob/main/background.js).
