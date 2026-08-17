@@ -44,7 +44,6 @@ def save_tokens(prefix: str, client_id: str, client_secret: str, body: dict[str,
     lines = [
         f"{prefix}_CLIENT_ID={client_id}",
         f"{prefix}_CLIENT_SECRET={client_secret}",
-        f"{prefix}_ACCESS_TOKEN={body.get('access_token', '')}",
         f"{prefix}_REFRESH_TOKEN={body.get('refresh_token', '')}",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -110,7 +109,7 @@ def main() -> None:
         raise SystemExit("No authorization response arrived within five minutes.")
     body = exchange(provider["token"], {"client_id": client_id, "client_secret": client_secret, "code": result["code"], "grant_type": "authorization_code", "redirect_uri": redirect_uri})
     path = save_tokens(prefix, client_id, client_secret, body)
-    print(f"Saved credentials to {path}. Copy those four lines into .env, then securely delete that temporary file.")
+    print(f"Saved credentials to {path}. Copy those three lines into .env, then securely delete that temporary file.")
 
 
 if __name__ == "__main__":

@@ -90,7 +90,7 @@ Use a separate Twitch account if you want messages to appear under a bot name. E
    python -m ninjabridge.authorize twitch
    ```
 
-5. It requests only Twitch IRC's `chat:read` and `chat:edit` permissions and writes `data/twitch-oauth.env`. Copy its four lines into `.env`, then delete the temporary file.
+5. It requests only Twitch IRC's `chat:read` and `chat:edit` permissions and writes `data/twitch-oauth.env`. Copy its three lines into `.env`, then delete the temporary file.
 6. If authorization was performed on your desktop, securely copy only those generated values into the Pi's `/opt/ninjabridge/.env`.
 7. Start NinjaBridge and run `/direct twitch channel:YOUR_CHANNEL` in Discord.
 
@@ -112,18 +112,18 @@ YouTube does not provide a permanent access token. NinjaBridge stores a refresh 
    ```
 
 7. Sign into the Google account whose YouTube channel should post. The helper requests `youtube.force-ssl`, saves `data/youtube-oauth.env`, and asks Google for offline access.
-8. Copy the four generated lines into the Pi's `.env`, then securely delete the temporary file.
+8. Copy the three generated lines into the Pi's `.env`, then securely delete the temporary file.
 9. Find the broadcast's `activeLiveChatId` through the YouTube Live Streaming API (or an API explorer) and run `/direct youtube live_chat_id:VALUE`.
 
 OAuth apps left in Google's **Testing** publishing status may receive refresh tokens that expire after seven days. Move the consent screen to Production when appropriate; unverified personal apps can still show a warning and have user limits.
 
 ## Direct Kick without opening router ports
 
-Kick sends incoming chat as HTTPS webhooks. NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel makes that one path reachable over Cloudflare's outbound connection. You do not forward port 8765 on the router.
+Kick sends incoming chat as HTTPS webhooks. NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel makes that one path reachable over Cloudflare's outbound connection. You do not forward port 8765 on the router. These listener values already have safe defaults and do not belong in `.env` unless an advanced installation deliberately changes them.
 
 1. Add a domain to Cloudflare.
 2. Create a Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Its webhook URL will be `https://kick-webhook.YOUR_DOMAIN/kick/webhook`.
-3. Give the application the chat read/write and event-subscription permissions Kick requests. Complete Kick OAuth for the broadcaster/bot account and place its access token, refresh token, client ID, and client secret in the corresponding `KICK_...` `.env` values.
+3. Give the application the chat read/write and event-subscription permissions Kick requests. Complete Kick OAuth for the broadcaster/bot account and place its refresh token, client ID, and client secret in the corresponding `KICK_...` `.env` values. NinjaBridge obtains short-lived access tokens automatically.
 4. Subscribe the app to Kick's `chat.message.sent` event for the broadcaster. Kick delivers subscribed events to the webhook URL registered for the app.
 5. Install `cloudflared` on the Pi using Cloudflare's current Debian/Raspberry Pi instructions, then authenticate and create a named tunnel:
 
