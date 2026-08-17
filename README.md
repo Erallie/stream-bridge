@@ -34,9 +34,9 @@ Do not run a second independent relay system. SSN owns platform-to-platform rela
 - `/status` shows the current configuration with a masked session ID.
 - `/disable` disconnects SSN while retaining other settings.
 
-## Optional AI companion
+## Optional NinjaMind companion
 
-Run the separate **LLM for NinjaBridge** project for local AI responses, per-person memory, mention handling, reactions, and ambient chatter. The companion can use Discord by itself or optionally listen to the same SSN session.
+Run the separate **NinjaMind** project for local AI responses, per-person memory, mention handling, reactions, and ambient chatter. NinjaMind can use Discord by itself or optionally listen to the same SSN session.
 
 ## Relay and duplicate behavior
 
