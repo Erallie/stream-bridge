@@ -69,12 +69,11 @@ class NinjaBridge(commands.Bot):
         key = self.store.claim_event(str(guild_id), platform, str(data.get("id", "")), user_id, str(data["chatmessage"]), data.get("timestamp", int(time.time())))
         if not key:
             return
-        identity = self.store.resolve_identity(str(guild_id), platform, user_id, str(data["chatname"]), str(data.get("chatimg", "")))
         config = self.store.get(str(guild_id))
         if config and config.discord_relay_channel_id and self.store.claim_delivery(str(guild_id), key, "discord"):
-            await self.send_webhook(guild_id, int(config.discord_relay_channel_id), identity, platform, str(data["chatmessage"]))
+            await self.send_webhook(guild_id, int(config.discord_relay_channel_id), str(data["chatname"]), str(data.get("chatimg", "")), platform, str(data["chatmessage"]))
 
-    async def send_webhook(self, guild_id: int, channel_id: int, identity: dict[str, Any], platform: str, content: str) -> None:
+    async def send_webhook(self, guild_id: int, channel_id: int, display_name: str, avatar_url: str, platform: str, content: str) -> None:
         guild = self.get_guild(guild_id)
         channel = guild.get_channel(channel_id) if guild else None
         if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
@@ -83,7 +82,7 @@ class NinjaBridge(commands.Bot):
         hook = next((h for h in hooks if h.name == "NinjaBridge"), None)
         if not hook:
             hook = await channel.create_webhook(name="NinjaBridge", reason="Cross-platform relay")
-        await hook.send(content, username=f"{identity['display_name']} ({platform.title()})"[:80], avatar_url=identity.get("avatar_url") or None, allowed_mentions=discord.AllowedMentions.none(), wait=True)
+        await hook.send(content, username=f"{display_name} ({platform.title()})"[:80], avatar_url=avatar_url or None, allowed_mentions=discord.AllowedMentions.none(), wait=True)
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.webhook_id or not message.guild:
@@ -165,27 +164,6 @@ async def receive_clear(i: discord.Interaction) -> None:
 
 
 bot.tree.add_command(receive_group)
-identity_group = app_commands.Group(name="identity", description="Manage cross-platform identities", default_permissions=discord.Permissions(administrator=True))
-
-
-@identity_group.command(name="link")
-async def identity_link(i: discord.Interaction, platform: str, user_id: str, display_name: str, avatar_url: str = "", owner: bool = False, handle: str = "") -> None:
-    assert i.guild_id
-    bot.store.link_identity(str(i.guild_id), platform, user_id, display_name, avatar_url, owner, handle)
-    await i.response.send_message(f"Linked {platform}:{user_id} to {display_name}.", ephemeral=True)
-
-
-@identity_group.command(name="list")
-async def identity_list(i: discord.Interaction) -> None:
-    assert i.guild_id
-    rows = bot.store.identity_summary(str(i.guild_id))
-    text = "\n".join(f"{r['display_name']} ← {r['platform']}:{r['platform_user_id']}" for r in rows) or "No identities."
-    await i.response.send_message(text[:1900], ephemeral=True)
-
-
-bot.tree.add_command(identity_group)
-
-
 @bot.tree.command(name="status", description="Show NinjaBridge configuration")
 @admin
 async def status(i: discord.Interaction) -> None:

@@ -1,6 +1,6 @@
 # NinjaBridge
 
-NinjaBridge connects Discord to Social Stream Ninja (SSN) and mirrors SSN platform chat into Discord with identity-aware webhook names and avatars. It contains no LLM and can run independently of any AI service.
+NinjaBridge connects Discord to Social Stream Ninja (SSN) and mirrors SSN platform chat into Discord using the platform-provided name and avatar. It contains no LLM, AI memory, or cross-platform identity-linking system.
 
 ## Install
 
@@ -29,8 +29,7 @@ Do not run a second independent relay system. SSN owns platform-to-platform rela
 
 - `/setup session_id relay_targets` connects SSN and sets destinations for Discord-originated messages.
 - `/forward add`, `/forward remove`, and `/forward clear` manage the Discord text channels and voice-channel side chats forwarded into SSN.
-- `/receive set` and `/receive clear` select or clear the Discord text channel or voice-channel side chat that receives identity-aware platform messages from SSN.
-- `/identity link|list` maps stable platform user IDs to a canonical name, avatar, and owner flag.
+- `/receive set` and `/receive clear` select or clear the Discord text channel or voice-channel side chat that receives platform messages from SSN.
 - `/status` shows the current configuration with a masked session ID.
 - `/disable` disconnects SSN while retaining other settings.
 
@@ -40,18 +39,18 @@ The same Discord channel may be configured for both directions. NinjaBridge igno
 
 ## Optional NinjaMind companion
 
-Run the separate **NinjaMind** project for local AI responses, per-person memory, mention handling, reactions, and ambient chatter. NinjaMind can use Discord by itself or optionally listen to the same SSN session.
+Run the separate **NinjaMind** project for local AI responses, cross-platform identity linking, per-person memory, mention handling, reactions, and ambient chatter. NinjaMind can use Discord by itself or optionally listen to the same SSN session.
 
 ## Relay and duplicate behavior
 
 - Discord user messages are injected into the SSN overlay once, then sent to configured platforms using SSN's normal `Name said: message` relay format.
-- Platform messages are relayed between platforms by SSN and mirrored to Discord by a `NinjaBridge` webhook using `Canonical Name (Platform)` and the canonical avatar.
+- Platform messages are relayed between platforms by SSN and mirrored to Discord by a `NinjaBridge` webhook using `Platform Name (Platform)` and the platform-provided avatar.
 - SSN messages marked `reflection` and bot messages are ignored by NinjaBridge.
 - Processed events are unique by platform/message ID, with a content fingerprint fallback.
 - Deliveries are unique by event/destination, preventing reconnects and retries from sending twice.
 - Discord webhook messages and bot messages are ignored by the Discord listener.
 
-Native Twitch, YouTube, Kick, and TikTok chats always display the connected relay account's avatar; those platforms do not permit per-message impersonation. Canonical per-person avatars are supported in Discord webhooks and can be used by a custom SSN overlay.
+Native Twitch, YouTube, Kick, and TikTok chats always display the connected relay account's avatar; those platforms do not permit per-message impersonation. Canonical identities and shared AI memory are handled exclusively by NinjaMind.
 
 ## Test
 
