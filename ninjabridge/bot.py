@@ -123,48 +123,48 @@ async def setup(i: discord.Interaction, session_id: str, relay_targets: str = "t
     await i.response.send_message("SSN session and relay targets saved.", ephemeral=True)
 
 
-channel_group = app_commands.Group(name="channel", description="Manage channels sent to SSN", default_permissions=discord.Permissions(administrator=True))
+forward_group = app_commands.Group(name="forward", description="Forward Discord channels to SSN", default_permissions=discord.Permissions(administrator=True))
 
 
-@channel_group.command(name="add")
+@forward_group.command(name="add")
 async def channel_add(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
     changed = bot.store.add_channel(str(i.guild_id), str(channel.id))
-    await i.response.send_message("Channel added." if changed else "Already configured.", ephemeral=True)
+    await i.response.send_message("Discord channel will now be forwarded to SSN." if changed else "That channel is already forwarded to SSN.", ephemeral=True)
 
 
-@channel_group.command(name="remove")
+@forward_group.command(name="remove")
 async def channel_remove(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
     changed = bot.store.remove_channel(str(i.guild_id), str(channel.id))
-    await i.response.send_message("Channel removed." if changed else "Not configured.", ephemeral=True)
+    await i.response.send_message("Discord channel will no longer be forwarded to SSN." if changed else "That channel was not being forwarded.", ephemeral=True)
 
 
-@channel_group.command(name="clear")
+@forward_group.command(name="clear")
 async def channel_clear(i: discord.Interaction) -> None:
     assert i.guild_id
-    await i.response.send_message(f"Removed {bot.store.clear_channels(str(i.guild_id))} channel(s).", ephemeral=True)
+    await i.response.send_message(f"Stopped forwarding {bot.store.clear_channels(str(i.guild_id))} Discord channel(s) to SSN.", ephemeral=True)
 
 
-bot.tree.add_command(channel_group)
-relay_group = app_commands.Group(name="relay-channel", description="Configure the platform-to-Discord mirror", default_permissions=discord.Permissions(administrator=True))
+bot.tree.add_command(forward_group)
+mirror_group = app_commands.Group(name="mirror", description="Mirror SSN platform chat into Discord", default_permissions=discord.Permissions(administrator=True))
 
 
-@relay_group.command(name="set")
+@mirror_group.command(name="set")
 async def relay_set(i: discord.Interaction, channel: discord.TextChannel) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", str(channel.id))
-    await i.response.send_message(f"Platform messages will be mirrored to {channel.mention}.", ephemeral=True)
+    await i.response.send_message(f"SSN platform messages will now be mirrored to {channel.mention}.", ephemeral=True)
 
 
-@relay_group.command(name="clear")
+@mirror_group.command(name="clear")
 async def relay_clear(i: discord.Interaction) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", None)
-    await i.response.send_message("Discord mirror disabled.", ephemeral=True)
+    await i.response.send_message("SSN-to-Discord mirroring disabled.", ephemeral=True)
 
 
-bot.tree.add_command(relay_group)
+bot.tree.add_command(mirror_group)
 identity_group = app_commands.Group(name="identity", description="Manage cross-platform identities", default_permissions=discord.Permissions(administrator=True))
 
 
@@ -194,7 +194,7 @@ async def status(i: discord.Interaction) -> None:
     session = c.session_id[:3] + "••••••" if c and c.session_id else "not set"
     channels = ", ".join(f"<#{x}>" for x in c.channel_ids) if c else "none"
     mirror = f"<#{c.discord_relay_channel_id}>" if c and c.discord_relay_channel_id else "off"
-    await i.response.send_message(f"Channels: {channels}\nSession: {session}\nDiscord mirror: {mirror}", ephemeral=True)
+    await i.response.send_message(f"Discord channels forwarded to SSN: {channels}\nSession: {session}\nSSN platform mirror in Discord: {mirror}", ephemeral=True)
 
 
 @bot.tree.command(name="disable", description="Disable SSN forwarding")
