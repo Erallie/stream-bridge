@@ -1,6 +1,6 @@
 # NinjaBridge
 
-NinjaBridge connects Discord to Social Stream Ninja (SSN) and mirrors SSN platform chat into Discord using the platform-provided name and avatar. It contains no LLM, AI memory, or cross-platform identity-linking system.
+NinjaBridge connects Discord with streaming chats. It can connect directly to Twitch and YouTube without SSN, or automatically prefer Social Stream Ninja when a configured SSN session becomes reachable. SSN adds TikTok and its wider platform catalog. NinjaBridge contains no LLM, AI memory, or cross-platform identity-linking system.
 
 ## Install
 
@@ -25,15 +25,23 @@ In SSN enable:
 
 Do not run a second independent relay system. SSN owns platform-to-platform relay; NinjaBridge explicitly relays Discord-originated messages through SSN because API-injected Discord messages have no captured browser tab.
 
+SSN is optional. For direct Twitch, put `TWITCH_BOT_USERNAME` and a user OAuth token with chat read/write access in `.env`, then run `/direct twitch channel`. For direct YouTube, put a current OAuth access token with the YouTube scope in `YOUTUBE_ACCESS_TOKEN`, then run `/direct youtube live_chat_id`. Direct YouTube access tokens expire; production deployments should provide a refreshed token before restart.
+
+When SSN connects, NinjaBridge ignores direct inbound copies and routes outbound messages through SSN. If SSN disconnects, direct Twitch/YouTube connections take over. By default the bot announces each switch in configured forward/receive channels; `/switchmessages enabled:false` disables those notices.
+
+Kick's official incoming chat events require webhook delivery to a reachable HTTPS service, so a purely local direct Kick receiver is not included yet. TikTok does not currently provide a general approved LIVE-chat read/write API; TikTok remains SSN-only. NinjaBridge does not use private or scraped platform endpoints.
+
 ## Core commands
 
 - `/setup session_id relay_targets` connects SSN and sets destinations for Discord-originated messages.
 - `/forward add`, `/forward remove`, and `/forward clear` manage the Discord text channels and voice-channel side chats forwarded into SSN.
 - `/receive set` and `/receive clear` select or clear the Discord text channel or voice-channel side chat that receives platform messages from SSN.
+- `/direct twitch`, `/direct youtube`, and `/direct disable` configure direct connections used without SSN.
+- `/switchmessages` enables or disables announcements when transport changes.
 - `/status` shows the current configuration with a masked session ID.
 - `/disable` disconnects SSN while retaining other settings.
 
-The direction words describe Discord's role: **forward** means Discord → SSN, while **receive** means SSN → Discord. Both features are optional and may be enabled independently.
+The direction words describe Discord's role: **forward** means Discord → active streaming transport, while **receive** means streaming platforms → Discord. Both features are optional and may be enabled independently.
 
 The same Discord channel may be configured for both directions. NinjaBridge ignores its own bot and webhook messages, so received SSN messages are not forwarded back into SSN.
 

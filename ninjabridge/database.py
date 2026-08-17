@@ -37,6 +37,8 @@ class ConfigStore:
         return GuildConfig(g,cs,r['ssn_session_id'],tuple(filter(None,r['relay_targets'].split(','))),self.get_setting(g,'discord_relay_channel_id'))
     def configured_guilds(self)->list[GuildConfig]:
         return [c for r in self.connection.execute("SELECT guild_id FROM guild_config WHERE ssn_session_id IS NOT NULL") if (c:=self.get(r[0]))]
+    def guild_ids(self)->list[str]:
+        return [row[0] for row in self.connection.execute("SELECT guild_id FROM guild_config")]
     def set_session(self,g:str,s:str,targets:list[str])->None:
         self._ensure(g); self.connection.execute("UPDATE guild_config SET ssn_session_id=?,relay_targets=?,updated_at=? WHERE guild_id=?",(s,','.join(targets),now(),g)); self.connection.commit()
     def clear_session(self,g:str)->None:self.connection.execute("UPDATE guild_config SET ssn_session_id=NULL,relay_targets='',updated_at=? WHERE guild_id=?",(now(),g));self.connection.commit()
