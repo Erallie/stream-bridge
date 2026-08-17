@@ -77,7 +77,7 @@ class NinjaBridge(commands.Bot):
     async def send_webhook(self, guild_id: int, channel_id: int, identity: dict[str, Any], platform: str, content: str) -> None:
         guild = self.get_guild(guild_id)
         channel = guild.get_channel(channel_id) if guild else None
-        if not isinstance(channel, discord.TextChannel):
+        if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
             return
         hooks = await channel.webhooks()
         hook = next((h for h in hooks if h.name == "NinjaBridge"), None)
@@ -151,14 +151,14 @@ receive_group = app_commands.Group(name="receive", description="Choose where Dis
 
 
 @receive_group.command(name="set")
-async def relay_set(i: discord.Interaction, channel: discord.TextChannel) -> None:
+async def receive_set(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", str(channel.id))
     await i.response.send_message(f"SSN platform messages will now be mirrored to {channel.mention}.", ephemeral=True)
 
 
 @receive_group.command(name="clear")
-async def relay_clear(i: discord.Interaction) -> None:
+async def receive_clear(i: discord.Interaction) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", None)
     await i.response.send_message("SSN-to-Discord mirroring disabled.", ephemeral=True)

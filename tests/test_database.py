@@ -13,13 +13,14 @@ class ConfigStoreTests(unittest.TestCase):
             store.set_session("guild-1", "session-one", ["twitch", "youtube"])
             store.add_channel("guild-1", "channel-1")
             store.add_channel("guild-1", "channel-2")
+            store.set_setting("guild-1", "discord_relay_channel_id", "channel-1")
             store.set_session("guild-2", "session-two", [])
             store.close()
 
             store = ConfigStore(path)
             self.assertEqual(
                 store.get("guild-1"),
-                GuildConfig("guild-1", ("channel-1", "channel-2"), "session-one", ("twitch", "youtube")),
+                GuildConfig("guild-1", ("channel-1", "channel-2"), "session-one", ("twitch", "youtube"), "channel-1"),
             )
             self.assertEqual(store.get("guild-2").session_id, "session-two")
             store.link_identity("guild-1", "youtube", "UC123", "Erallie", "https://example/avatar.png", True)
