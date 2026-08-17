@@ -1,0 +1,8 @@
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /home/CHANGE_ME/.cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+    - hostname: kick-webhook.example.com
+      path: /kick/webhook
+      service: http://127.0.0.1:8765
+    - service: http_status:404

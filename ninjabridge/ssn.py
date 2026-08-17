@@ -9,9 +9,9 @@ MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 StatusHandler = Callable[[bool], Awaitable[None]]
 
 class SsnClient:
-    def __init__(self,url:str,session_id:str,relay_targets:tuple[str,...],logger:logging.LoggerAdapter,on_message:MessageHandler|None=None,on_status:StatusHandler|None=None)->None:
+    def __init__(self,url:str,session_id:str,relay_targets:tuple[str,...],logger:logging.LoggerAdapter,on_message:MessageHandler|None=None,on_status:StatusHandler|None=None,password:str="")->None:
         self.url=url;self.session_id=session_id;self.relay_targets=relay_targets;self.logger=logger;self.on_message=on_message
-        self.on_status=on_status;self.connected=False
+        self.on_status=on_status;self.password=password;self.connected=False
         self.queue:asyncio.Queue[dict[str,Any]]=asyncio.Queue(maxsize=1000);self.stopping=False;self.task:asyncio.Task[None]|None=None
     def start(self)->None:
         if not self.task or self.task.done():self.task=asyncio.create_task(self._run(),name=f"ssn-{self.session_id[:4]}")
@@ -45,7 +45,9 @@ class SsnClient:
             try:
                 self.logger.info('Connecting to Social Stream Ninja')
                 async with websockets.connect(self.url,open_timeout=15,ping_interval=25,ping_timeout=15,close_timeout=5) as socket:
-                    await socket.send(json.dumps({'join':self.session_id,'in':4,'out':1}));attempt=0;self.connected=True;self.logger.info('Connected to SSN channels 4→1')
+                    join={'join':self.session_id,'in':4,'out':1}
+                    if self.password:join['password']=self.password
+                    await socket.send(json.dumps(join));attempt=0;self.connected=True;self.logger.info('Connected to SSN channels 4→1')
                     if self.on_status:await self.on_status(True)
                     sender=asyncio.create_task(self._sender(socket));receiver=asyncio.create_task(self._receiver(socket))
                     done,pending=await asyncio.wait((sender,receiver),return_when=asyncio.FIRST_EXCEPTION)

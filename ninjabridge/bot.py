@@ -64,7 +64,8 @@ class NinjaBridge(commands.Bot):
             async def status(connected: bool) -> None:
                 await self.transport_status(guild_id, connected)
             logger = logging.LoggerAdapter(logging.getLogger("ninjabridge.ssn"), {"guild_id": guild_id})
-            self.ssn_clients[guild_id] = SsnClient(self.ssn_url, config.session_id or "", config.relay_targets, logger, received, status)
+            password = str(self.store.get_setting(str(guild_id), "ssn_password", ""))
+            self.ssn_clients[guild_id] = SsnClient(self.ssn_url, config.session_id or "", config.relay_targets, logger, received, status, password)
             self.ssn_clients[guild_id].start()
         return self.ssn_clients[guild_id]
 
@@ -75,7 +76,12 @@ class NinjaBridge(commands.Bot):
                 if not client or not client.connected:
                     await self.handle_direct(guild_id, data)
             guild = str(guild_id)
-            hub = DirectHub(received, str(self.store.get_setting(guild, "direct_twitch_channel", "")), str(self.store.get_setting(guild, "direct_youtube_live_chat_id", "")))
+            hub = DirectHub(
+                received,
+                str(self.store.get_setting(guild, "direct_twitch_channel", "")),
+                str(self.store.get_setting(guild, "direct_youtube_live_chat_id", "")),
+                str(self.store.get_setting(guild, "direct_kick_broadcaster_user_id", "")),
+            )
             self.direct_hubs[guild_id] = hub
             hub.start()
         return self.direct_hubs[guild_id]
@@ -169,9 +175,10 @@ admin = app_commands.default_permissions(administrator=True)
 
 @bot.tree.command(name="setup", description="Connect this server to Social Stream Ninja")
 @admin
-async def setup(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok") -> None:
+async def setup(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok", password: str = "") -> None:
     assert i.guild_id
     bot.store.set_session(str(i.guild_id), session_id.strip(), parse_list(relay_targets))
+    bot.store.set_setting(str(i.guild_id), "ssn_password", password)
     await bot.reset_ssn(i.guild_id)
     config = bot.store.get(str(i.guild_id))
     if config:
@@ -241,14 +248,26 @@ async def direct_youtube(i: discord.Interaction, live_chat_id: str) -> None:
     await i.response.send_message("Direct YouTube live-chat ID saved. OAuth is read from .env.", ephemeral=True)
 
 
+@direct_group.command(name="kick")
+async def direct_kick(i: discord.Interaction, broadcaster_user_id: str) -> None:
+    assert i.guild_id
+    if not broadcaster_user_id.isdecimal():
+        await i.response.send_message("The Kick broadcaster user ID must contain only numbers.", ephemeral=True)
+        return
+    bot.store.set_setting(str(i.guild_id), "direct_kick_broadcaster_user_id", broadcaster_user_id)
+    await bot.reset_direct(i.guild_id)
+    await i.response.send_message("Direct Kick saved. OAuth and the webhook receiver are read from .env.", ephemeral=True)
+
+
 @direct_group.command(name="disable")
 async def direct_disable(i: discord.Interaction, platform: str) -> None:
     assert i.guild_id
     platform = platform.casefold()
-    if platform not in {"twitch", "youtube"}:
-        await i.response.send_message("Platform must be twitch or youtube.", ephemeral=True)
+    if platform not in {"twitch", "youtube", "kick"}:
+        await i.response.send_message("Platform must be twitch, youtube, or kick.", ephemeral=True)
         return
-    bot.store.set_setting(str(i.guild_id), f"direct_{platform}_{'channel' if platform == 'twitch' else 'live_chat_id'}", "")
+    suffix = {"twitch": "channel", "youtube": "live_chat_id", "kick": "broadcaster_user_id"}[platform]
+    bot.store.set_setting(str(i.guild_id), f"direct_{platform}_{suffix}", "")
     await bot.reset_direct(i.guild_id)
     await i.response.send_message(f"Direct {platform.title()} disabled.", ephemeral=True)
 

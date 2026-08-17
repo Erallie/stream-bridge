@@ -1,0 +1,19 @@
+[Unit]
+Description=NinjaBridge cross-platform Discord chat bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=CHANGE_ME
+Group=CHANGE_ME
+WorkingDirectory=/opt/ninjabridge
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/ninjabridge/bot-env/bin/python -m ninjabridge
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
