@@ -139,13 +139,14 @@ class TwitchAdapter:
 
 
 class YouTubeAdapter:
-    def __init__(self, live_chat_id: str, handler: Handler) -> None:
-        self.live_chat_id = live_chat_id
+    def __init__(self, handler: Handler) -> None:
+        self.live_chat_id = ""
         self.handler = handler
         self.task: asyncio.Task[None] | None = None
         self.page_token = ""
         self.oauth = OAuthToken("YOUTUBE", "https://oauth2.googleapis.com/token")
         self.session: aiohttp.ClientSession | None = None
+        self.waiting_for_broadcast = False
 
     def start(self) -> None:
         self.task = asyncio.create_task(self.run(), name="youtube-live-chat")
@@ -165,6 +166,32 @@ class YouTubeAdapter:
                     return response.status, body
         raise RuntimeError("YouTube request retry failed")
 
+    async def discover_live_chat(self) -> str:
+        session = await self.get_session()
+        status, body = await self.request(
+            session,
+            "GET",
+            "https://www.googleapis.com/youtube/v3/liveBroadcasts",
+            params={"part": "id,snippet", "broadcastStatus": "active", "mine": "true", "maxResults": 5},
+        )
+        if status >= 400:
+            raise RuntimeError(f"YouTube broadcast discovery failed: HTTP {status}: {body}")
+        for item in body.get("items", []):
+            live_chat_id = str(item.get("snippet", {}).get("liveChatId", ""))
+            if live_chat_id:
+                if live_chat_id != self.live_chat_id:
+                    self.page_token = ""
+                    logging.info("Direct YouTube found the active livestream chat")
+                self.live_chat_id = live_chat_id
+                self.waiting_for_broadcast = False
+                return live_chat_id
+        self.live_chat_id = ""
+        self.page_token = ""
+        if not self.waiting_for_broadcast:
+            logging.info("Direct YouTube is enabled; waiting for the authorized channel to go live")
+            self.waiting_for_broadcast = True
+        return ""
+
     async def run(self) -> None:
         if not self.oauth.configured:
             logging.error("Direct YouTube requires YouTube OAuth credentials")
@@ -172,6 +199,9 @@ class YouTubeAdapter:
         session = await self.get_session()
         while True:
             try:
+                if not self.live_chat_id and not await self.discover_live_chat():
+                    await asyncio.sleep(30)
+                    continue
                 params = {"liveChatId": self.live_chat_id, "part": "id,snippet,authorDetails", "maxResults": 200}
                 if self.page_token:
                     params["pageToken"] = self.page_token
@@ -190,9 +220,15 @@ class YouTubeAdapter:
                 return
             except Exception:
                 logging.exception("Direct YouTube polling failed; retrying")
+                self.live_chat_id = ""
+                self.page_token = ""
                 await asyncio.sleep(15)
 
     async def send(self, text: str) -> None:
+        if not self.oauth.configured:
+            raise RuntimeError("YouTube OAuth has not been configured")
+        if not self.live_chat_id and not await self.discover_live_chat():
+            raise RuntimeError("the authorized YouTube channel does not have an active livestream chat")
         payload = {"snippet": {"liveChatId": self.live_chat_id, "type": "textMessageEvent", "textMessageDetails": {"messageText": text[:200]}}}
         session = await self.get_session()
         status, body = await self.request(session, "POST", "https://www.googleapis.com/youtube/v3/liveChat/messages", params={"part": "snippet"}, json=payload)
@@ -208,7 +244,7 @@ class YouTubeAdapter:
 
 
 class DirectHub:
-    def __init__(self, handler: Handler, twitch_channel: str = "", youtube_live_chat_id: str = "") -> None:
+    def __init__(self, handler: Handler, twitch_channel: str = "", youtube_enabled: bool = False) -> None:
         self.adapters: dict[str, Any] = {}
         self.reflections = ReflectionTracker()
 
@@ -222,8 +258,8 @@ class DirectHub:
 
         if twitch_channel:
             self.adapters["twitch"] = TwitchAdapter(twitch_channel, platform_handler("twitch"))
-        if youtube_live_chat_id:
-            self.adapters["youtube"] = YouTubeAdapter(youtube_live_chat_id, platform_handler("youtube"))
+        if youtube_enabled:
+            self.adapters["youtube"] = YouTubeAdapter(platform_handler("youtube"))
 
     def start(self) -> None:
         for adapter in self.adapters.values():

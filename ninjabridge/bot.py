@@ -111,7 +111,10 @@ class NinjaBridge(commands.Bot):
             hub = DirectHub(
                 received,
                 str(self.store.get_setting(guild, "direct_twitch_channel", "")),
-                str(self.store.get_setting(guild, "direct_youtube_live_chat_id", "")),
+                bool(
+                    self.store.get_setting(guild, "direct_youtube_enabled", False)
+                    or self.store.get_setting(guild, "direct_youtube_live_chat_id", "")
+                ),
             )
             self.direct_hubs[guild_id] = hub
             hub.start()
@@ -281,7 +284,7 @@ forward_group = app_commands.Group(name="forward", description="Choose Discord c
 async def channel_add(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
     changed = bot.store.add_channel(str(i.guild_id), str(channel.id))
-    await i.response.send_message("Discord channel will now be forwarded to SSN." if changed else "That channel is already forwarded to SSN.", ephemeral=True)
+    await i.response.send_message("Messages in that Discord channel will now be forwarded to the active relay (SSN or direct platforms)." if changed else "That channel is already enabled for forwarding.", ephemeral=True)
 
 
 @forward_group.command(name="remove", description="Stop forwarding messages from one Discord channel")
@@ -289,13 +292,13 @@ async def channel_add(i: discord.Interaction, channel: discord.TextChannel | dis
 async def channel_remove(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
     changed = bot.store.remove_channel(str(i.guild_id), str(channel.id))
-    await i.response.send_message("Discord channel will no longer be forwarded to SSN." if changed else "That channel was not being forwarded.", ephemeral=True)
+    await i.response.send_message("That Discord channel will no longer be forwarded." if changed else "That channel was not being forwarded.", ephemeral=True)
 
 
 @forward_group.command(name="clear", description="Remove every configured Discord forwarding channel")
 async def channel_clear(i: discord.Interaction) -> None:
     assert i.guild_id
-    await i.response.send_message(f"Stopped forwarding {bot.store.clear_channels(str(i.guild_id))} Discord channel(s) to SSN.", ephemeral=True)
+    await i.response.send_message(f"Stopped forwarding {bot.store.clear_channels(str(i.guild_id))} Discord channel(s).", ephemeral=True)
 
 
 bot.tree.add_command(forward_group)
@@ -328,16 +331,16 @@ async def direct_twitch(i: discord.Interaction, channel: str) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "direct_twitch_channel", channel.lstrip("#"))
     await bot.reset_direct(i.guild_id)
-    await i.response.send_message("Direct Twitch channel saved. Credentials are read from .env.", ephemeral=True)
+    await i.response.send_message("Direct Twitch channel saved.", ephemeral=True)
 
 
-@direct_group.command(name="youtube", description="Connect directly to one YouTube livestream chat")
-@app_commands.describe(live_chat_id="The broadcast's activeLiveChatId, not its video ID")
-async def direct_youtube(i: discord.Interaction, live_chat_id: str) -> None:
+@direct_group.command(name="youtube", description="Use the authorized YouTube channel's active livestream chat")
+async def direct_youtube(i: discord.Interaction) -> None:
     assert i.guild_id
-    bot.store.set_setting(str(i.guild_id), "direct_youtube_live_chat_id", live_chat_id)
+    bot.store.set_setting(str(i.guild_id), "direct_youtube_enabled", True)
+    bot.store.remove_setting(str(i.guild_id), "direct_youtube_live_chat_id")
     await bot.reset_direct(i.guild_id)
-    await i.response.send_message("Direct YouTube live-chat ID saved. OAuth is read from .env.", ephemeral=True)
+    await i.response.send_message("Direct YouTube enabled. NinjaBridge will automatically use the authorized channel's active livestream chat.", ephemeral=True)
 
 
 @direct_group.command(name="kick", description="Privately authorize this server's broadcaster account with Kick")
@@ -361,9 +364,11 @@ async def direct_disable(i: discord.Interaction, platform: str) -> None:
         return
     if platform == "kick":
         await bot.kick.disable(i.guild_id)
+    elif platform == "youtube":
+        bot.store.set_setting(str(i.guild_id), "direct_youtube_enabled", False)
+        bot.store.remove_setting(str(i.guild_id), "direct_youtube_live_chat_id")
     else:
-        suffix = {"twitch": "channel", "youtube": "live_chat_id"}[platform]
-        bot.store.set_setting(str(i.guild_id), f"direct_{platform}_{suffix}", "")
+        bot.store.set_setting(str(i.guild_id), "direct_twitch_channel", "")
     await bot.reset_direct(i.guild_id)
     await i.response.send_message(f"Direct {platform.title()} disabled.", ephemeral=True)
 

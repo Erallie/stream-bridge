@@ -115,7 +115,7 @@ YouTube does not provide a permanent access token. NinjaBridge stores a refresh 
 
 7. Sign into the Google account whose YouTube channel should post. The helper requests `youtube.force-ssl`, saves `data/youtube-oauth.env`, and asks Google for offline access.
 8. Copy the three generated lines into the Pi's `.env`, then securely delete the temporary file.
-9. Find the broadcast's `activeLiveChatId` through the YouTube Live Streaming API (or an API explorer) and run `/direct youtube live_chat_id:VALUE`.
+9. Run `/direct youtube`. NinjaBridge automatically finds the authorized channel's active livestream chat. You can enable this before going live; it keeps checking until an active chat exists.
 
 OAuth apps left in Google's **Testing** publishing status may receive refresh tokens that expire after seven days. Move the consent screen to Production when appropriate; unverified personal apps can still show a warning and have user limits.
 
@@ -142,16 +142,25 @@ Kick sends incoming chat as HTTPS webhooks and returns each broadcaster's OAuth 
    cloudflared tunnel route dns ninjabridge kick-webhook.YOUR_DOMAIN
    ```
 
-6. Copy `deploy/cloudflared-config.yml.example` to `~/.cloudflared/config.yml`. Replace the tunnel UUID, Linux username, and hostname.
-7. Install the tunnel service:
+6. Copy `deploy/cloudflared-config.yml.example` to `~/.cloudflared/config.yml`. Replace the tunnel UUID, Linux username, and hostname. The single hostname rule intentionally routes both `/kick/webhook` and `/kick/oauth/callback` to NinjaBridge. If `KICK_WEBHOOK_PORT` is `8766`, change `8765` to `8766` in this file too.
+7. Validate the configuration, then install the tunnel service:
 
    ```bash
+   cloudflared tunnel ingress validate
    sudo cloudflared --config /home/YOUR_PI_USER/.cloudflared/config.yml service install
    sudo systemctl enable --now cloudflared
-   sudo systemctl status cloudflared
+   sudo systemctl status cloudflared --no-pager -l
    ```
 
-8. Restart NinjaBridge. In each Discord server, an administrator runs `/direct kick` and follows the private authorization link while signed into the Kick account that owns that server's channel. NinjaBridge discovers the broadcaster ID, subscribes to `chat.message.sent`, encrypts the refresh token, and stores that authorization separately for the Discord server.
+8. Restart NinjaBridge. Confirm that its listener is running, then test the public callback route. A `400` response saying the authorization link is invalid or expired is expected here—it proves Cloudflare reached NinjaBridge without a real OAuth request:
+
+   ```bash
+   curl -i http://127.0.0.1:8765/kick/oauth/callback
+   curl -i https://kick-webhook.YOUR_DOMAIN/kick/oauth/callback
+   ```
+
+   Use your configured local port in the first command.
+9. In each Discord server, an administrator runs `/direct kick` and follows the private authorization link while signed into the Kick account that owns that server's channel. NinjaBridge discovers the broadcaster ID, subscribes to `chat.message.sent`, encrypts the refresh token, and stores that authorization separately for the Discord server.
 
 NinjaBridge uses one shared local listener and routes each signed event by broadcaster ID. It downloads Kick's official public key and rejects invalid signatures. `/direct disable platform:kick` removes only the current Discord server's saved authorization. Keep Cloudflare's catch-all `http_status:404` rule so the tunnel exposes nothing else.
 
@@ -168,7 +177,7 @@ When SSN is connected, NinjaBridge routes through SSN and ignores direct inbound
 - `/setup` saves an SSN session and relay targets.
 - `/forward add`, `/forward remove`, `/forward clear` manage Discord → streaming chat channels.
 - `/receive set`, `/receive clear` manage streaming chats → Discord.
-- `/direct twitch` and `/direct youtube` configure installation-level direct adapters. `/direct kick` privately authorizes a separate Kick broadcaster for the current Discord server.
+- `/direct twitch` chooses the Twitch channel for this Discord server. `/direct youtube` automatically follows the authorized YouTube account's active livestream. `/direct kick` privately authorizes a separate Kick broadcaster for the current Discord server.
 - `/direct message` customizes direct relay text with `{name}`, `{message}`, and `{platform}`. An empty value restores `{name} said: {message}`.
 - `/direct disable platform` disables one direct adapter.
 - `/switchmessages` controls transport-switch notices.

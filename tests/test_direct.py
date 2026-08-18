@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from ninjabridge.direct import TwitchAdapter
+from ninjabridge.direct import TwitchAdapter, YouTubeAdapter
 from ninjabridge.kick import broadcaster_id, kick_chat_payload
 
 
@@ -39,6 +39,43 @@ class DirectAdapterTests(unittest.TestCase):
 
         self.assertEqual(broadcaster_id(event), "12345")
         self.assertEqual(broadcaster_id({}), "")
+
+    def test_youtube_discovers_the_authorized_accounts_active_chat(self) -> None:
+        async def handler(payload):
+            pass
+
+        async def exercise() -> None:
+            adapter = YouTubeAdapter(handler)
+
+            async def request(session, method, url, **kwargs):
+                self.assertEqual(url, "https://www.googleapis.com/youtube/v3/liveBroadcasts")
+                self.assertEqual(kwargs["params"]["broadcastStatus"], "active")
+                self.assertEqual(kwargs["params"]["mine"], "true")
+                return 200, {"items": [{"snippet": {"liveChatId": "discovered-chat"}}]}
+
+            adapter.request = request
+            adapter.get_session = lambda: asyncio.sleep(0, result=object())
+            self.assertEqual(await adapter.discover_live_chat(), "discovered-chat")
+            self.assertEqual(adapter.live_chat_id, "discovered-chat")
+
+        asyncio.run(exercise())
+
+    def test_youtube_waits_when_the_authorized_account_is_not_live(self) -> None:
+        async def handler(payload):
+            pass
+
+        async def exercise() -> None:
+            adapter = YouTubeAdapter(handler)
+
+            async def request(session, method, url, **kwargs):
+                return 200, {"items": []}
+
+            adapter.request = request
+            adapter.get_session = lambda: asyncio.sleep(0, result=object())
+            self.assertEqual(await adapter.discover_live_chat(), "")
+            self.assertTrue(adapter.waiting_for_broadcast)
+
+        asyncio.run(exercise())
 
 
 if __name__ == "__main__":
