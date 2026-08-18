@@ -75,6 +75,12 @@ class CommandMetadataTests(unittest.TestCase):
         self.assertIn("ssn", commands)
         self.assertEqual({command.name for command in commands["ssn"].commands}, {"connect", "disconnect"})
 
+    def test_ssn_connect_does_not_request_an_overlay_password(self) -> None:
+        ssn = next(command for command in bot.tree.get_commands() if command.name == "ssn")
+        connect = next(command for command in ssn.commands if command.name == "connect")
+
+        self.assertEqual([parameter.name for parameter in connect.parameters], ["session_id", "relay_targets"])
+
     def test_direct_kick_authorizes_without_requesting_an_account_id(self) -> None:
         direct = next(command for command in bot.tree.get_commands() if command.name == "direct")
         kick = next(command for command in direct.commands if command.name == "kick")

@@ -112,8 +112,7 @@ class NinjaBridge(commands.Bot):
             async def status(connected: bool) -> None:
                 await self.transport_status(guild_id, connected)
             logger = logging.LoggerAdapter(logging.getLogger("ninjabridge.ssn"), {"guild_id": guild_id})
-            password = str(self.store.get_setting(str(guild_id), "ssn_password", ""))
-            self.ssn_clients[guild_id] = SsnClient(self.ssn_url, config.session_id or "", config.relay_targets, logger, received, status, password)
+            self.ssn_clients[guild_id] = SsnClient(self.ssn_url, config.session_id or "", config.relay_targets, logger, received, status)
             self.ssn_clients[guild_id].start()
         return self.ssn_clients[guild_id]
 
@@ -286,12 +285,11 @@ ssn_group = app_commands.Group(
 @app_commands.describe(
     session_id="The SSN session ID that NinjaBridge should join",
     relay_targets="Comma-separated platforms SSN should relay messages to",
-    password="The SSN session password, if the session is protected",
 )
-async def ssn_connect(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok", password: str = "") -> None:
+async def ssn_connect(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok") -> None:
     assert i.guild_id
     bot.store.set_session(str(i.guild_id), session_id.strip(), parse_list(relay_targets))
-    bot.store.set_setting(str(i.guild_id), "ssn_password", password)
+    bot.store.remove_setting(str(i.guild_id), "ssn_password")
     await bot.reset_ssn(i.guild_id)
     config = bot.store.get(str(i.guild_id))
     if config:

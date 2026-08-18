@@ -27,7 +27,6 @@ class SsnClient:
         logger: logging.LoggerAdapter,
         on_message: MessageHandler | None = None,
         on_status: StatusHandler | None = None,
-        password: str = "",
     ) -> None:
         self.url = url
         self.http_api_url = self._default_http_api_url(url, session_id)
@@ -36,7 +35,6 @@ class SsnClient:
         self.logger = logger
         self.on_message = on_message
         self.on_status = on_status
-        self.password = password
         self.connected = False
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)
         self.stopping = False
@@ -113,8 +111,6 @@ class SsnClient:
         async with aiohttp.ClientSession(timeout=client_timeout) as session:
             while not self.stopping:
                 payload: dict[str, Any] = {"action": "getHype", "get": "ninjabridge-presence"}
-                if self.password:
-                    payload["password"] = self.password
                 host_available = False
                 try:
                     async with session.post(self.http_api_url, json=payload) as response:
@@ -143,8 +139,6 @@ class SsnClient:
                     close_timeout=5,
                 ) as socket:
                     join: dict[str, Any] = {"join": self.session_id, "in": 4, "out": 1}
-                    if self.password:
-                        join["password"] = self.password
                     await socket.send(json.dumps(join))
                     attempt = 0
                     self.logger.info("Connected to SSN relay; waiting for the SSN host")

@@ -162,7 +162,7 @@ NinjaBridge uses one shared local listener and routes each signed event by broad
 
 ## Optional Social Stream Ninja
 
-Run `/ssn connect session_id:YOUR_SESSION relay_targets:twitch,youtube,kick,tiktok`. If the SSN room is protected, also fill in the command's optional `password` field. The command response is private to the administrator, and the password is stored in the local SQLite database.
+Run `/ssn connect session_id:YOUR_SESSION relay_targets:twitch,youtube,kick,tiktok`. The command response is private to the administrator. SSN's API connection uses the session ID and does not require the separate password used by VDO/overlay rooms.
 
 In SSN enable remote API control and the option that routes API chat to normal dock/overlay connections. Enable SSN's built-in relay when SSN should own platform-to-platform relay. NinjaBridge ignores reflections, bot messages, its Discord webhook messages, and already-processed event IDs to prevent loops.
 
