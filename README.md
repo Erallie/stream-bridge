@@ -1,198 +1,548 @@
 # StreamBridge
 
-StreamBridge connects Discord with Twitch, YouTube, and Kick even when Social Stream Ninja is offline. If a configured SSN session becomes available, StreamBridge automatically prefers SSN, which adds TikTok and SSN's wider platform support. It announces transport changes unless `/switchmessages enabled:false` is set.
+StreamBridge connects your Discord server’s conversations with livestream chats across Twitch, YouTube, Kick, and platforms supported through Social Stream Ninja.
 
-StreamBridge contains no LLM or identity-linking system. Those features live in the optional NinjaMind companion.
+Messages can travel in both directions:
 
-## What you need
+- Send messages from selected Discord channels to your streaming chats.
+- Display messages from streaming platforms inside a selected Discord channel.
+- Relay messages between connected streaming platforms.
+- Use normal Discord text channels or the text chat attached to a voice channel.
+- Connect the same Discord channel for both sending and receiving.
 
-- A Raspberry Pi or another always-on computer with Python 3.11+
-- A Discord bot application
-- A separate Twitch account for the visible bot identity (recommended)
-- A Google Cloud OAuth client for the YouTube channel that will post
-- A Kick developer application and a domain on Cloudflare if direct Kick receiving is wanted
-- Optionally, an SSN session ID
+StreamBridge can connect directly to Twitch, YouTube, and Kick. It can also integrate with Social Stream Ninja for additional platform support, including TikTok.
 
-The Twitch code runs on your Pi. It is therefore a locally hosted chat client, not a centrally hosted “cloud bot.” The bot account itself is still an ordinary Twitch account.
+## Main features
 
-## Install on a Raspberry Pi
+### Cross-platform chat relay
 
-Replace `YOUR_GITHUB_NAME` and the repository name if necessary.
+StreamBridge can relay conversations between:
 
-```bash
-sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip
-sudo mkdir -p /opt/stream-bridge
-sudo chown "$USER":"$USER" /opt/stream-bridge
-git clone https://github.com/YOUR_GITHUB_NAME/stream-bridge.git /opt/stream-bridge
-cd /opt/stream-bridge
-python3 -m venv bot-env
-bot-env/bin/python -m pip install --upgrade pip
-bot-env/bin/python -m pip install -r requirements.txt
-cp .env.example .env
-nano .env
+- Discord
+- Twitch
+- YouTube
+- Kick
+- TikTok through Social Stream Ninja
+- Other platforms supported by your Social Stream Ninja session
+
+When direct connections are active, messages received from one streaming platform can be forwarded to the other enabled platforms and Discord.
+
+### Discord-to-stream forwarding
+
+Administrators can select one or more Discord channels whose messages should be forwarded to streaming chats.
+
+Both of these channel types are supported:
+
+- Normal Discord text channels
+- Voice-channel side chats
+
+Adding a forwarding channel does not require you to receive streaming messages in that channel.
+
+### Stream-to-Discord messages
+
+Administrators can choose a Discord channel where Twitch, YouTube, Kick, and Social Stream Ninja messages appear.
+
+Messages use Discord webhooks so that each message can display the original chatter’s:
+
+- Display name
+- Platform
+- Profile image, when available
+- Message content
+
+The receiving channel may also be one of the channels used for forwarding.
+
+### Direct connections and SSN support
+
+StreamBridge supports two relay methods:
+
+- **Direct mode:** StreamBridge connects directly to Twitch, YouTube, and Kick.
+- **Social Stream Ninja mode:** StreamBridge sends messages through a configured Social Stream Ninja session.
+
+If Social Stream Ninja becomes available, StreamBridge can switch to SSN automatically. If SSN goes offline, StreamBridge switches back to its configured direct connections.
+
+TikTok support requires Social Stream Ninja.
+
+### Duplicate and loop prevention
+
+StreamBridge tracks sent and received messages to prevent relayed messages from repeatedly bouncing between Discord and streaming platforms.
+
+### Discord custom emotes
+
+When Social Stream Ninja is connected, Discord custom emotes can be sent to SSN as rendered emotes.
+
+When StreamBridge uses direct platform connections, Discord custom emotes are converted into readable names. For example:
+
+```text
+<:erallieHeart:1529884213434777742>
 ```
 
-Never commit `.env`, `data/`, OAuth tokens, Discord tokens, tunnel credentials, or logs. They are excluded by `.gitignore`.
+becomes:
 
-StreamBridge automatically saves rotated platform refresh tokens in `data/oauth_tokens.json`, so a provider-issued replacement survives a restart. Keep the original refresh token in `.env`; if you deliberately replace it there, the new value takes precedence. Processed-event and delivery history is retained for 30 days by default and cleaned at startup and every 24 hours while the bot remains online. Advanced installations can change `HISTORY_RETENTION_DAYS`.
-
-For a first foreground run:
-
-```bash
-cd /opt/stream-bridge
-bot-env/bin/python -m streambridge
+```text
+erallieHeart
 ```
 
-### Start StreamBridge automatically
+### Custom relay messages
 
-Edit `deploy/streambridge.service` and replace both `CHANGE_ME` values with the Pi Linux username. Then:
+Administrators can customize how messages appear when StreamBridge is using direct platform connections.
 
-```bash
-sudo cp deploy/streambridge.service /etc/systemd/system/streambridge.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now streambridge
-sudo systemctl status streambridge
+Available placeholders are:
+
+- `{name}` — the original sender’s name
+- `{message}` — the message
+- `{platform}` — the source platform
+
+For example:
+
+```text
+[{platform}] {name}: {message}
 ```
 
-Follow its logs with:
+could produce:
 
-```bash
-journalctl -u streambridge -f
+```text
+[Discord] Erika: Hello, everyone!
 ```
 
-This replaces the old `nohup` command. The service restarts after a crash or reboot.
+## Adding StreamBridge to your server
 
-## Discord setup
+Use the official StreamBridge invitation link:
 
-1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an application and bot.
-2. Copy the bot token to `DISCORD_TOKEN` and the application's numeric Application ID to `DISCORD_CLIENT_ID` in `.env`.
-3. On the Bot page, enable **Message Content Intent**. StreamBridge does not currently need Server Members Intent.
-4. In OAuth2 → URL Generator, choose `bot` and `applications.commands`.
-5. Grant **View Channels**, **Send Messages**, **Read Message History**, and **Manage Webhooks**. Add **Attach Files** and **Embed Links** if you want rich content preserved.
-6. Open the generated URL and invite the bot.
+[Invite StreamBridge to Discord](YOUR_DISCORD_BOT_INVITE_LINK)
 
-Configure Discord after it starts:
+When inviting StreamBridge, select the server where you have permission to add bots.
 
-- `/forward add channel` adds a normal text channel or a voice channel's side chat as Discord → platforms.
-- `/receive set channel` chooses a normal text channel or voice side chat for platforms → Discord.
-- The same channel may be used for both directions.
-- `/status` shows the active transport and configured channels.
+StreamBridge should have these permissions in the channels it uses:
 
-## Twitch bot setup
+- View Channels
+- Send Messages
+- Read Message History
+- Manage Webhooks
+- Embed Links
+- Attach Files
 
-Use a separate Twitch account if you want messages to appear under a bot name. Enable two-factor authentication on the developer account, then:
+The **Manage Webhooks** permission is needed in the receiving channel so that streaming messages can retain their original names, platforms, and profile pictures.
 
-1. Sign into the [Twitch Developer Console](https://dev.twitch.tv/console/apps) and register an application.
-2. Set its OAuth redirect URL to `http://localhost:8787/callback` and choose an appropriate chat-bot/application category.
-3. Put the Client ID and generated Client Secret in `.env` as `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET`.
-4. Run the authorization assistant on a computer with a browser while signed into the separate Twitch bot account:
+StreamBridge’s configuration commands require the Discord **Administrator** permission.
 
-   ```bash
-   python -m streambridge.authorize twitch
-   ```
+## Recommended initial setup
 
-5. It requests only Twitch IRC's `chat:read` and `chat:edit` permissions and writes `data/twitch-oauth.env`. Copy its three lines into `.env`, then delete the temporary file.
-6. If authorization was performed on your desktop, securely copy only those generated values into the Pi's `/opt/stream-bridge/.env`.
-7. Start StreamBridge and run `/direct twitch channel:YOUR_CHANNEL` in Discord.
+A typical setup takes four steps:
 
-The access token refreshes automatically. The Pi makes an outbound secure WebSocket connection to Twitch; no inbound port or cloud chatbot host is required.
+1. Choose one or more Discord channels that send messages to streaming platforms.
+2. Choose the Discord channel that receives streaming messages.
+3. Connect the desired streaming platforms.
+4. Run `/status` to verify everything.
 
-## YouTube OAuth setup
+For example:
 
-Create one Google OAuth application for StreamBridge. Each Discord server then privately authorizes its own YouTube channel with `/direct youtube`; encrypted refresh tokens are stored separately in the database.
+```text
+/forward add channel:#stream-chat
+/receive set channel:#stream-chat
+/direct twitch channel:your_twitch_channel
+/status
+```
 
-1. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project.
-2. Enable **YouTube Data API v3**.
-3. Configure the OAuth audience as **External**, complete the app branding, and publish the app **In production** so any Google account can authorize it.
-4. Create an OAuth 2.0 Client ID of type **Web application**.
-5. Add `https://streambridge-webhook.YOUR_DOMAIN/youtube/oauth/callback` as an authorized redirect URI. It must exactly match `YOUTUBE_OAUTH_REDIRECT_URI` in `.env`.
-6. Put only the app's client ID, client secret, and redirect URI in `.env`. Do not put a YouTube refresh token there.
-7. Add the `youtube.force-ssl` scope under **Data Access**, then submit the production app for Google OAuth verification. This scope is required to read and post live-chat messages. Before verification is approved, users may see Google's unverified-app warning and the project is subject to Google's new-user cap.
-8. Restart StreamBridge. In each Discord server, an administrator runs `/direct youtube` and opens the private link while signed into the YouTube account whose channel should be connected.
-
-StreamBridge automatically discovers that account's active livestream chat. Authorization can be completed before going live; StreamBridge keeps checking until an active chat exists.
-
-Do not leave the public StreamBridge app in **Testing** or maintain a test-user allowlist. Production publishing makes it available to any Google account; verification removes the unverified-app warning and new-user cap for the requested scope.
-
-## Direct Kick without opening router ports
-
-Kick sends incoming chat as HTTPS webhooks. Kick and YouTube return each user's OAuth authorization through HTTPS. By default, StreamBridge's shared web gateway listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel carries those routes over an outbound connection. You do not forward a router port. If that local port is already occupied, set `WEBHOOK_PORT` to a free port in `.env` and use that same port in the Cloudflare tunnel configuration.
-
-1. Add a domain to Cloudflare.
-2. Create one Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Select **Create a bot for this app**. Set its OAuth redirect URL to `https://streambridge-webhook.YOUR_DOMAIN/kick/oauth/callback` and its separate webhook URL to `https://streambridge-webhook.YOUR_DOMAIN/kick/webhook`.
-3. Select only **Read user information**, **Write to Chat feed**, and **Subscribe to events**. Put the application's `KICK_CLIENT_ID`, `KICK_CLIENT_SECRET`, and exact `KICK_OAUTH_REDIRECT_URI` in `.env`. Do not put a broadcaster refresh token or broadcaster ID in `.env`.
-4. Generate one database-encryption key and place the printed value in `TOKEN_ENCRYPTION_KEY` in `.env`. It protects both Kick and YouTube per-server authorizations:
-
-   ```bash
-   cd /opt/stream-bridge
-   bot-env/bin/python -m streambridge.keygen
-   ```
-
-   Back up this key securely. Changing or losing it makes saved Kick and YouTube authorizations unreadable.
-5. Install `cloudflared` outside `bot-env` using Cloudflare's current Debian/Raspberry Pi instructions, then authenticate and create a named tunnel:
-
-   ```bash
-   cloudflared tunnel login
-   cloudflared tunnel create streambridge
-   cloudflared tunnel route dns streambridge streambridge-webhook.YOUR_DOMAIN
-   ```
-
-6. Copy `deploy/cloudflared-config.yml.example` to `~/.cloudflared/config.yml`. Replace the tunnel UUID, Linux username, and hostname. The single hostname rule intentionally routes `/kick/webhook`, `/kick/oauth/callback`, and `/youtube/oauth/callback` to StreamBridge. If `WEBHOOK_PORT` is `8766`, change `8765` to `8766` in this file too.
-7. Validate the configuration, then install the tunnel service:
-
-   ```bash
-   cloudflared tunnel ingress validate
-   sudo cloudflared --config /home/YOUR_PI_USER/.cloudflared/config.yml service install
-   sudo systemctl enable --now cloudflared
-   sudo systemctl status cloudflared --no-pager -l
-   ```
-
-8. Restart StreamBridge. Confirm that its listener is running, then test the public callback route. A `400` response saying the authorization link is invalid or expired is expected here—it proves Cloudflare reached StreamBridge without a real OAuth request:
-
-   ```bash
-   curl -i http://127.0.0.1:8765/kick/oauth/callback
-   curl -i https://streambridge-webhook.YOUR_DOMAIN/kick/oauth/callback
-   ```
-
-   Use your configured local port in the first command.
-9. In each Discord server, an administrator runs `/direct kick` and follows the private authorization link while signed into the Kick account that owns that server's channel. StreamBridge discovers the broadcaster ID, subscribes to `chat.message.sent`, encrypts the refresh token, and stores that authorization separately for the Discord server.
-
-StreamBridge uses one shared local listener and routes each signed event by broadcaster ID. It downloads Kick's official public key and rejects invalid signatures. `/direct disable platform:kick` removes only the current Discord server's saved authorization. Keep Cloudflare's catch-all `http_status:404` rule so the tunnel exposes nothing else.
-
-## Optional Social Stream Ninja
-
-Run `/ssn connect session_id:YOUR_SESSION relay_targets:twitch,youtube,kick,tiktok`. The command response is private to the administrator. SSN's API connection uses the session ID and does not require the separate password used by VDO/overlay rooms.
-
-In SSN enable remote API control and the option that routes API chat to normal dock/overlay connections. Enable SSN's built-in relay when SSN should own platform-to-platform relay. StreamBridge ignores reflections, bot messages, its Discord webhook messages, and already-processed event IDs to prevent loops.
-
-When SSN is connected, StreamBridge routes through SSN and ignores direct inbound copies. StreamBridge verifies that the SSN extension/app itself is responding, rather than treating an otherwise empty cloud room as connected. If the host closes or stops responding, direct Twitch, YouTube, and Kick adapters resume ownership automatically; the default detection window is about 25 seconds and can be tuned with `SSN_HOST_PROBE_INTERVAL` and `SSN_HOST_PROBE_TIMEOUT`. TikTok remains SSN-only because TikTok does not offer a general public LIVE-chat read/write API for this use.
+You may use the same Discord channel for both `/forward add` and `/receive set`.
 
 ## Commands
 
-- `/ssn connect` saves an SSN session and relay targets; `/ssn disconnect` disconnects SSN without deleting direct settings.
-- `/forward add`, `/forward remove`, `/forward clear` manage Discord → streaming chat channels.
-- `/receive set`, `/receive clear` manage streaming chats → Discord.
-- `/direct twitch` chooses the channel joined by the shared Twitch bot account. `/direct youtube` privately authorizes this server's YouTube channel and automatically follows its active livestream. `/direct kick` privately authorizes this server's Kick broadcaster.
-- `/direct message` customizes direct relay text with `{name}`, `{message}`, and `{platform}`. An empty value restores `{name} said: {message}`.
-- `/direct disable platform` disables one direct adapter.
-- `/switchmessages` controls transport-switch notices.
-- `/status` displays configuration with the SSN session masked and identifies each configured direct channel/account.
+All configuration responses containing private information or authorization links are visible only to the administrator who ran the command.
 
-## Updating and testing
+### `/forward add`
 
-```bash
-cd /opt/stream-bridge
-git pull --ff-only
-bot-env/bin/python -m pip install -r requirements.txt
-bot-env/bin/python -m unittest discover -s tests -v
-sudo systemctl restart streambridge
+Adds a Discord channel as a source for messages sent to streaming platforms.
+
+```text
+/forward add channel:#channel
 ```
 
-The SQLite migrations preserve existing configuration. Direct and SSN messages use platform/message IDs plus delivery records to suppress duplicate forwards.
+You can run this command multiple times to forward more than one channel.
 
-While SSN is disconnected, every accepted Twitch, YouTube, or Kick message is sent to the configured Discord receive channel and relayed to every other enabled direct platform. Messages in configured Discord forward channels are relayed to every enabled direct platform. The source platform is excluded from its own fan-out, preventing an immediate echo.
+Supported channel types:
 
-Discord role colors and platform-provided username colors are retained as `nameColor` metadata. Twitch, YouTube, and Kick do not render arbitrary HTML or allow a relay bot to color only part of a native chat message, so StreamBridge sends plain text there instead of exposing markup. SSN can use the Discord role color in its overlay when SSN is connected.
+- Text channels
+- Voice-channel side chats
 
-Discord custom emojis are injected into SSN as safe `<img class="regular-emote">` markup backed by Discord's CDN. Animated custom emojis use GIF URLs. StreamBridge marks those messages `textonly: false`, allowing SSN's dock, overlays, and emote wall to render them. Ordinary text is HTML-escaped, and direct native-platform relays use the separate plain-text form such as `:emote_name:`.
+Example:
+
+```text
+/forward add channel:#stream-chat
+```
+
+### `/forward remove`
+
+Stops forwarding messages from one Discord channel.
+
+```text
+/forward remove channel:#channel
+```
+
+This does not affect other forwarding channels or messages received from streaming platforms.
+
+### `/forward clear`
+
+Removes every configured Discord forwarding channel.
+
+```text
+/forward clear
+```
+
+Afterward, streaming messages can still be received in Discord if a receiving channel is configured, but Discord messages will not be sent to the streaming platforms.
+
+### `/receive set`
+
+Chooses the Discord channel that receives messages from streaming platforms.
+
+```text
+/receive set channel:#channel
+```
+
+The selected channel may be a normal text channel or a voice-channel side chat.
+
+It may also be one of the channels configured with `/forward add`.
+
+### `/receive clear`
+
+Stops sending streaming-platform messages into Discord.
+
+```text
+/receive clear
+```
+
+This does not disable platform connections or Discord-to-platform forwarding.
+
+### `/direct twitch`
+
+Connects this server to a Twitch channel for direct relay.
+
+```text
+/direct twitch channel:CHANNEL_NAME
+```
+
+The channel may be entered with or without `#`.
+
+Examples:
+
+```text
+/direct twitch channel:erallie
+```
+
+```text
+/direct twitch channel:#erallie
+```
+
+StreamBridge joins the specified Twitch channel using its configured Twitch bot account.
+
+### `/direct youtube`
+
+Begins authorization for a YouTube channel.
+
+```text
+/direct youtube
+```
+
+StreamBridge responds privately with an authorization link that expires after ten minutes.
+
+Open the link and sign into the Google account that owns the YouTube channel you want to connect. StreamBridge automatically finds that channel’s active livestream chat when the channel is live.
+
+You can authorize the channel before starting a stream. StreamBridge will wait for an active livestream chat to become available.
+
+### `/direct kick`
+
+Begins authorization for a Kick broadcaster account.
+
+```text
+/direct kick
+```
+
+StreamBridge responds privately with an authorization link that expires after ten minutes.
+
+Open the link while signed into the Kick account that owns the channel you want to connect.
+
+The authorized account is the broadcaster whose chat StreamBridge reads. Messages relayed into Kick are posted using StreamBridge’s Kick bot identity.
+
+### `/direct disable`
+
+Disables one direct platform connection.
+
+```text
+/direct disable platform:PLATFORM
+```
+
+Supported values are:
+
+```text
+twitch
+youtube
+kick
+```
+
+Examples:
+
+```text
+/direct disable platform:twitch
+```
+
+```text
+/direct disable platform:youtube
+```
+
+```text
+/direct disable platform:kick
+```
+
+Disabling one platform does not affect the others.
+
+### `/direct message`
+
+Changes the message format used when StreamBridge relays messages through direct platform connections.
+
+```text
+/direct message template:TEMPLATE
+```
+
+Available placeholders:
+
+```text
+{name}
+{message}
+{platform}
+```
+
+The template must contain `{message}`.
+
+Example:
+
+```text
+/direct message template:[{platform}] {name}: {message}
+```
+
+To restore the default format, run `/direct message` without entering a template.
+
+The default format is:
+
+```text
+{name} said: {message}
+```
+
+### `/ssn connect`
+
+Connects the Discord server to a Social Stream Ninja session.
+
+```text
+/ssn connect session_id:SESSION_ID relay_targets:PLATFORMS
+```
+
+`relay_targets` is a comma-separated list. For example:
+
+```text
+/ssn connect session_id:your-session-id relay_targets:twitch,youtube,kick,tiktok
+```
+
+If `relay_targets` is omitted, the default is:
+
+```text
+twitch,youtube,kick,tiktok
+```
+
+The Social Stream Ninja overlay-room password is not required. StreamBridge uses the SSN session ID.
+
+The SSN session must be configured correctly by whoever operates that Social Stream Ninja session.
+
+### `/ssn disconnect`
+
+Disconnects the server from Social Stream Ninja.
+
+```text
+/ssn disconnect
+```
+
+This does not delete or disable direct Twitch, YouTube, or Kick connections. StreamBridge can resume direct relay using any direct platforms that remain configured.
+
+### `/switchmessages`
+
+Controls whether StreamBridge posts notices when it switches between SSN and direct mode.
+
+Enable notices:
+
+```text
+/switchmessages enabled:true
+```
+
+Disable notices:
+
+```text
+/switchmessages enabled:false
+```
+
+If direct mode becomes active but no direct platform connections are configured, StreamBridge warns that messages will not be relayed.
+
+### `/status`
+
+Shows the server’s current StreamBridge configuration.
+
+```text
+/status
+```
+
+The status includes:
+
+- Discord channels being forwarded
+- Whether an SSN session is configured and connected
+- Platforms assigned to SSN
+- Directly connected platforms and accounts
+- The current direct relay message template
+- The Discord channel receiving platform messages
+
+The SSN session ID is masked for privacy.
+
+## Understanding forwarding and receiving
+
+Forwarding and receiving are independent.
+
+### Forwarding only
+
+If you configure `/forward add` but not `/receive set`:
+
+- Discord messages can be sent to streaming platforms.
+- Streaming messages will not be displayed in Discord.
+
+### Receiving only
+
+If you configure `/receive set` but do not add forwarding channels:
+
+- Streaming messages can appear in Discord.
+- Discord messages will not be sent to streaming platforms.
+
+### Both directions
+
+If you configure both:
+
+- Messages from selected Discord channels can be sent to streaming platforms.
+- Messages from streaming platforms can appear in Discord.
+- The same Discord channel may be used for both.
+
+## Direct mode versus Social Stream Ninja
+
+### Direct mode supports
+
+- Twitch
+- YouTube
+- Kick
+
+Direct mode continues working even when the computer running Social Stream Ninja is offline.
+
+### Social Stream Ninja mode supports
+
+- TikTok
+- Twitch
+- YouTube
+- Kick
+- Other platforms supported by the connected SSN session
+
+When StreamBridge detects an active SSN host, it can let SSN handle the platform relay. When the SSN host stops responding, StreamBridge returns to direct mode.
+
+The exact platforms available through SSN depend on the connected Social Stream Ninja setup.
+
+## Privacy and authorization
+
+YouTube and Kick authorization links are:
+
+- Shown privately to the administrator
+- Valid for a limited time
+- Associated with the Discord server where the command was used
+
+Authorizing one Discord server does not automatically connect the same platform account to another server.
+
+Only authorize accounts you own or are permitted to manage.
+
+StreamBridge does not need your Google, YouTube, or Kick password. Authentication occurs on the platform’s own website.
+
+## Troubleshooting
+
+### A command is not visible
+
+Make sure:
+
+- StreamBridge has been invited with the `applications.commands` authorization scope.
+- You have the Discord Administrator permission.
+- Discord has finished synchronizing the bot’s commands.
+
+### StreamBridge cannot post in a channel
+
+Check that it has:
+
+- View Channel
+- Send Messages
+- Read Message History
+
+For messages received from platforms, also grant:
+
+- Manage Webhooks
+- Embed Links
+- Attach Files
+
+### Streaming messages do not appear in Discord
+
+Run:
+
+```text
+/status
+```
+
+Then verify:
+
+- A receiving channel is shown.
+- The desired direct platform is connected, or SSN is connected.
+- StreamBridge has permission to view and post in the receiving channel.
+- StreamBridge has permission to manage webhooks there.
+
+### Discord messages are not sent to streaming platforms
+
+Verify:
+
+- The Discord channel was added with `/forward add`.
+- At least one direct platform is connected, or SSN is connected.
+- The message was not sent by another bot or by StreamBridge’s own webhook.
+- StreamBridge can read the channel.
+
+### YouTube is connected but no messages appear
+
+The authorized YouTube channel must have an active livestream with live chat enabled. StreamBridge automatically waits for and discovers the active chat.
+
+### The authorization link expired
+
+Run the relevant command again:
+
+```text
+/direct youtube
+```
+
+or:
+
+```text
+/direct kick
+```
+
+Each generated link expires after ten minutes.
+
+### The wrong YouTube or Kick account appears
+
+Sign out of that platform in your browser, open a private/incognito window, sign into the intended broadcaster account, and generate a new authorization link.
+
+### TikTok is unavailable
+
+TikTok requires a working Social Stream Ninja connection. It is not available through StreamBridge’s direct mode.
+
+## Support
+
+If you encounter a problem, include the following when requesting help:
+
+- The command you ran
+- The response StreamBridge displayed
+- The output of `/status`
+- The source and destination platforms involved
+- Whether StreamBridge was using direct mode or Social Stream Ninja
+
+Never share authorization links, access tokens, refresh tokens, client secrets, Discord bot tokens, or complete SSN session credentials in a public support channel.
