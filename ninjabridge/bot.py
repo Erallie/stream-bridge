@@ -422,7 +422,7 @@ async def status(i: discord.Interaction) -> None:
     ]
     direct = ", ".join(direct_platforms) or "none"
     template = str(bot.store.get_setting(str(i.guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
-    await i.response.send_message(f"Discord channels forwarded: {channels}\nSSN session: {session} ({ssn_state})\nDirect platforms: {direct}\nDirect relay message: `{template}`\nPlatform messages received in Discord: {mirror}", ephemeral=True)
+    await i.response.send_message(f"**Discord channels forwarded:** {channels}\n**SSN session:** {session} ({ssn_state})\n**Direct platforms:** {direct}\n**Direct relay message:** `{template}`\n**Platform messages received in Discord:** {mirror}", ephemeral=True)
 
 
 @bot.tree.command(name="disable", description="Disconnect this server from SSN without removing direct connections")
