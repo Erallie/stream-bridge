@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import Mock
 
-from ninjabridge.direct import TwitchAdapter, YouTubeAdapter
+from ninjabridge.direct import TwitchAdapter, YouTubeAdapter, youtube_error_reasons
 from ninjabridge.kick import broadcaster_id, kick_chat_payload
 
 
@@ -51,7 +51,7 @@ class DirectAdapterTests(unittest.TestCase):
             async def request(session, method, url, **kwargs):
                 self.assertEqual(url, "https://www.googleapis.com/youtube/v3/liveBroadcasts")
                 self.assertEqual(kwargs["params"]["broadcastStatus"], "active")
-                self.assertEqual(kwargs["params"]["mine"], "true")
+                self.assertNotIn("mine", kwargs["params"])
                 return 200, {"items": [{"snippet": {"liveChatId": "discovered-chat"}}]}
 
             adapter.request = request
@@ -60,6 +60,11 @@ class DirectAdapterTests(unittest.TestCase):
             self.assertEqual(adapter.live_chat_id, "discovered-chat")
 
         asyncio.run(exercise())
+
+    def test_youtube_recognizes_a_normally_ended_live_chat(self) -> None:
+        body = {"error": {"errors": [{"reason": "liveChatEnded"}]}}
+
+        self.assertEqual(youtube_error_reasons(body), {"liveChatEnded"})
 
     def test_youtube_waits_when_the_authorized_account_is_not_live(self) -> None:
         async def handler(payload):

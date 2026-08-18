@@ -17,6 +17,19 @@ from ninjabridge.relay import ReflectionTracker
 Handler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
+def youtube_error_reasons(body: Any) -> set[str]:
+    if not isinstance(body, dict):
+        return set()
+    error = body.get("error", {})
+    if not isinstance(error, dict):
+        return set()
+    return {
+        str(item.get("reason", ""))
+        for item in error.get("errors", [])
+        if isinstance(item, dict) and item.get("reason")
+    }
+
+
 class TwitchAdapter:
     def __init__(self, channel: str, handler: Handler) -> None:
         self.channel = channel.lstrip("#").lower()
@@ -187,7 +200,7 @@ class YouTubeAdapter:
             session,
             "GET",
             "https://www.googleapis.com/youtube/v3/liveBroadcasts",
-            params={"part": "id,snippet", "broadcastStatus": "active", "mine": "true", "maxResults": 5},
+            params={"part": "id,snippet", "broadcastStatus": "active", "maxResults": 5},
         )
         if status >= 400:
             raise RuntimeError(f"YouTube broadcast discovery failed: HTTP {status}: {body}")
@@ -221,6 +234,13 @@ class YouTubeAdapter:
                 if self.page_token:
                     params["pageToken"] = self.page_token
                 status, body = await self.request(session, "GET", "https://www.googleapis.com/youtube/v3/liveChat/messages", params=params)
+                if youtube_error_reasons(body) & {"liveChatEnded", "liveChatNotFound"}:
+                    logging.info("Direct YouTube livestream ended; waiting for the next active broadcast")
+                    self.live_chat_id = ""
+                    self.page_token = ""
+                    self.waiting_for_broadcast = True
+                    await asyncio.sleep(self.discovery_interval)
+                    continue
                 if status >= 400:
                     raise RuntimeError(f"YouTube HTTP {status}: {body}")
                 initial = not self.page_token
