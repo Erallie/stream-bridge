@@ -121,7 +121,7 @@ OAuth apps left in Google's **Testing** publishing status may receive refresh to
 
 ## Direct Kick without opening router ports
 
-Kick sends incoming chat as HTTPS webhooks and returns each broadcaster's OAuth authorization through HTTPS. NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel exposes only those two paths over an outbound connection. You do not forward a router port.
+Kick sends incoming chat as HTTPS webhooks and returns each broadcaster's OAuth authorization through HTTPS. By default, NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel exposes only those two paths over an outbound connection. You do not forward a router port. If that local port is already occupied, set `KICK_WEBHOOK_PORT` to a free port in `.env` and use that same port for both services in the Cloudflare tunnel configuration.
 
 1. Add a domain to Cloudflare.
 2. Create one Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Select **Create a bot for this app**. Set its OAuth redirect URL to `https://kick-webhook.YOUR_DOMAIN/kick/oauth/callback` and its separate webhook URL to `https://kick-webhook.YOUR_DOMAIN/kick/webhook`.
