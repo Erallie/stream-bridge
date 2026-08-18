@@ -20,9 +20,9 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from ninjabridge.database import ConfigStore
-from ninjabridge.oauth import OAuthToken
-from ninjabridge.relay import ReflectionTracker
+from streambridge.database import ConfigStore
+from streambridge.oauth import OAuthToken
+from streambridge.relay import ReflectionTracker
 
 KickHandler = Callable[[int, dict[str, Any]], Awaitable[None]]
 AuthorizedHandler = Callable[[int, str], Awaitable[None]]
@@ -180,7 +180,7 @@ class KickGateway:
 
     def authorization_url(self, guild_id: int, listener_ready: bool) -> str:
         if not self.authorization_configured:
-            raise RuntimeError("Kick authorization has not been configured by the NinjaBridge owner.")
+            raise RuntimeError("Kick authorization has not been configured by the StreamBridge owner.")
         if not listener_ready:
             raise RuntimeError("The authorization receiver is still starting. Try again in a moment.")
         self._prune_pending()
@@ -207,7 +207,7 @@ class KickGateway:
         state = request.query.get("state", "")
         pending = self.pending.pop(state, None)
         if not pending or pending.expires_at < time.monotonic():
-            return web.Response(status=400, text="This NinjaBridge authorization link is invalid or expired.")
+            return web.Response(status=400, text="This StreamBridge authorization link is invalid or expired.")
         if request.query.get("error"):
             return web.Response(status=400, text=f"Kick authorization was declined: {request.query['error']}")
         code = request.query.get("code", "")
@@ -224,8 +224,8 @@ class KickGateway:
             await self.on_authorized(pending.guild_id, username)
         except Exception:
             logging.exception("Kick OAuth callback failed for guild %s", pending.guild_id)
-            return web.Response(status=500, text="NinjaBridge could not finish Kick authorization. Check its logs.")
-        return web.Response(text=f"Kick channel {username} is now connected to NinjaBridge. You may close this tab.")
+            return web.Response(status=500, text="StreamBridge could not finish Kick authorization. Check its logs.")
+        return web.Response(text=f"Kick channel {username} is now connected to StreamBridge. You may close this tab.")
 
     async def exchange_code(self, code: str, verifier: str) -> dict[str, Any]:
         session = await self.get_session()

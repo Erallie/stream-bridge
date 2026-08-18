@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 
-from ninjabridge.database import ConfigStore
-from ninjabridge.kick import KickGateway
+from streambridge.database import ConfigStore
+from streambridge.kick import KickGateway
 
 
 async def ignore_event(guild_id: int, data: dict) -> None:
@@ -20,7 +20,7 @@ async def ignore_authorized(guild_id: int, username: str) -> None:
 
 class KickGatewayTests(unittest.TestCase):
     def test_authorizations_are_encrypted_and_isolated_by_guild(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="ninja-bridge-") as directory:
+        with tempfile.TemporaryDirectory(prefix="stream-bridge-") as directory:
             key = Fernet.generate_key().decode("ascii")
             environment = {
                 "KICK_CLIENT_ID": "client",
@@ -45,7 +45,7 @@ class KickGatewayTests(unittest.TestCase):
                 store.close()
 
     def test_authorization_state_is_bound_to_one_guild(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="ninja-bridge-") as directory:
+        with tempfile.TemporaryDirectory(prefix="stream-bridge-") as directory:
             environment = {
                 "KICK_CLIENT_ID": "client",
                 "KICK_CLIENT_SECRET": "secret",

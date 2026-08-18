@@ -9,7 +9,7 @@ def normalize_relay_text(text: str) -> str:
 
 
 class ReflectionTracker:
-    """Bounded, short-lived record of messages sent by NinjaBridge."""
+    """Bounded, short-lived record of messages sent by StreamBridge."""
 
     def __init__(self, ttl_seconds: float = 120.0, max_per_platform: int = 500) -> None:
         self.ttl_seconds = ttl_seconds

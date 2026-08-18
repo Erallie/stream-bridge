@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 os.environ.setdefault("DISCORD_CLIENT_ID", "123456789012345678")
 
-from ninjabridge.bot import bot, format_status, webhook_username
-from ninjabridge.relay import ReflectionTracker
+from streambridge.bot import bot, format_status, webhook_username
+from streambridge.relay import ReflectionTracker
 
 
 class CommandMetadataTests(unittest.TestCase):

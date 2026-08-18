@@ -49,7 +49,7 @@ def save_tokens(prefix: str, client_id: str, client_secret: str, body: dict[str,
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Authorize NinjaBridge with a streaming platform")
+    parser = argparse.ArgumentParser(description="Authorize StreamBridge with a streaming platform")
     parser.add_argument("provider", choices=PROVIDERS)
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()

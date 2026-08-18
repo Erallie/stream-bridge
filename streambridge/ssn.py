@@ -12,7 +12,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import aiohttp
 import websockets
 
-from ninjabridge.messages import to_relay_text
+from streambridge.messages import to_relay_text
 
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 StatusHandler = Callable[[bool], Awaitable[None]]
@@ -110,7 +110,7 @@ class SsnClient:
         client_timeout = aiohttp.ClientTimeout(total=timeout)
         async with aiohttp.ClientSession(timeout=client_timeout) as session:
             while not self.stopping:
-                payload: dict[str, Any] = {"action": "getHype", "get": "ninjabridge-presence"}
+                payload: dict[str, Any] = {"action": "getHype", "get": "streambridge-presence"}
                 host_available = False
                 try:
                     async with session.post(self.http_api_url, json=payload) as response:

@@ -1,6 +1,6 @@
 import unittest
 
-from ninjabridge.relay import ReflectionTracker, normalize_relay_text
+from streambridge.relay import ReflectionTracker, normalize_relay_text
 
 
 class ReflectionTrackerTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 import unittest
 
-from ninjabridge.messages import (
+from streambridge.messages import (
     discord_to_plain_content,
     render_discord_content,
     ssn_to_plain_text,

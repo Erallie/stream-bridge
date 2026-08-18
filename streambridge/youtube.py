@@ -13,8 +13,8 @@ import aiohttp
 from aiohttp import web
 from cryptography.fernet import Fernet, InvalidToken
 
-from ninjabridge.database import ConfigStore
-from ninjabridge.oauth import OAuthToken
+from streambridge.database import ConfigStore
+from streambridge.oauth import OAuthToken
 
 AuthorizedHandler = Callable[[int, str], Awaitable[None]]
 
@@ -90,7 +90,7 @@ class YouTubeGateway:
 
     def authorization_url(self, guild_id: int, listener_ready: bool) -> str:
         if not (self.client_id and self.client_secret and self.redirect_uri and self.fernet):
-            raise RuntimeError("YouTube authorization has not been configured by the NinjaBridge owner.")
+            raise RuntimeError("YouTube authorization has not been configured by the StreamBridge owner.")
         if not listener_ready:
             raise RuntimeError("The authorization receiver is still starting. Try again in a moment.")
         now = time.monotonic()
@@ -116,7 +116,7 @@ class YouTubeGateway:
     async def oauth_callback(self, request: web.Request) -> web.Response:
         pending = self.pending.pop(request.query.get("state", ""), None)
         if not pending or pending.expires_at < time.monotonic():
-            return web.Response(status=400, text="This NinjaBridge YouTube authorization link is invalid or expired.")
+            return web.Response(status=400, text="This StreamBridge YouTube authorization link is invalid or expired.")
         if request.query.get("error"):
             return web.Response(status=400, text=f"YouTube authorization was declined: {request.query['error']}")
         code = request.query.get("code", "")
@@ -152,8 +152,8 @@ class YouTubeGateway:
             await self.on_authorized(pending.guild_id, title)
         except Exception:
             logging.exception("YouTube OAuth callback failed for guild %s", pending.guild_id)
-            return web.Response(status=500, text="NinjaBridge could not finish YouTube authorization. Check its logs.")
-        return web.Response(text=f"YouTube channel {title} is now connected to NinjaBridge. You may close this tab.")
+            return web.Response(status=500, text="StreamBridge could not finish YouTube authorization. Check its logs.")
+        return web.Response(text=f"YouTube channel {title} is now connected to StreamBridge. You may close this tab.")
 
     def token(self, guild_id: int) -> OAuthToken | None:
         account = self.accounts.get(guild_id)

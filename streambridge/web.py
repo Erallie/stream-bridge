@@ -6,8 +6,8 @@ import os
 
 from aiohttp import web
 
-from ninjabridge.kick import KickGateway
-from ninjabridge.youtube import YouTubeGateway
+from streambridge.kick import KickGateway
+from streambridge.youtube import YouTubeGateway
 
 
 class WebGateway:
@@ -33,7 +33,7 @@ class WebGateway:
     async def run_listener(self) -> None:
         while True:
             try:
-                self.runner = web.AppRunner(self.create_app(), access_log=logging.getLogger("ninjabridge.web.http"))
+                self.runner = web.AppRunner(self.create_app(), access_log=logging.getLogger("streambridge.web.http"))
                 await self.runner.setup()
                 await web.TCPSite(
                     self.runner,

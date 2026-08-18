@@ -2,12 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ninjabridge.database import ConfigStore, GuildConfig
+from streambridge.database import ConfigStore, GuildConfig
 
 
 class ConfigStoreTests(unittest.TestCase):
     def test_persists_independent_multi_channel_configuration(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="ninja-bridge-") as directory:
+        with tempfile.TemporaryDirectory(prefix="stream-bridge-") as directory:
             path = str(Path(directory) / "bot.sqlite")
             store = ConfigStore(path)
             store.set_session("guild-1", "session-one", ["twitch", "youtube"])
@@ -31,7 +31,7 @@ class ConfigStoreTests(unittest.TestCase):
             store.close()
 
     def test_prunes_old_event_and_delivery_history(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="ninja-bridge-") as directory:
+        with tempfile.TemporaryDirectory(prefix="stream-bridge-") as directory:
             store = ConfigStore(str(Path(directory) / "bot.sqlite"))
             event = store.claim_event("guild-1", "twitch", "old-message", "user", "Hello", 1)
             self.assertIsNotNone(event)

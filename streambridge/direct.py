@@ -11,8 +11,8 @@ from typing import Any
 import aiohttp
 import websockets
 
-from ninjabridge.oauth import OAuthToken
-from ninjabridge.relay import ReflectionTracker
+from streambridge.oauth import OAuthToken
+from streambridge.relay import ReflectionTracker
 
 Handler = Callable[[dict[str, Any]], Awaitable[None]]
 

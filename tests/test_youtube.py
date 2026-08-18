@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 
-from ninjabridge.database import ConfigStore
-from ninjabridge.youtube import YouTubeGateway
+from streambridge.database import ConfigStore
+from streambridge.youtube import YouTubeGateway
 
 
 async def ignore_authorized(guild_id: int, title: str) -> None:
@@ -16,7 +16,7 @@ async def ignore_authorized(guild_id: int, title: str) -> None:
 
 class YouTubeGatewayTests(unittest.TestCase):
     def test_authorizations_are_encrypted_and_isolated_by_guild(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="ninja-bridge-") as directory:
+        with tempfile.TemporaryDirectory(prefix="stream-bridge-") as directory:
             environment = {
                 "YOUTUBE_CLIENT_ID": "client",
                 "YOUTUBE_CLIENT_SECRET": "secret",
@@ -39,7 +39,7 @@ class YouTubeGatewayTests(unittest.TestCase):
                 store.close()
 
     def test_authorization_state_is_bound_to_one_guild(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="ninja-bridge-") as directory:
+        with tempfile.TemporaryDirectory(prefix="stream-bridge-") as directory:
             environment = {
                 "YOUTUBE_CLIENT_ID": "client",
                 "YOUTUBE_CLIENT_SECRET": "secret",

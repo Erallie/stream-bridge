@@ -1,5 +1,5 @@
 [Unit]
-Description=NinjaBridge cross-platform Discord chat bridge
+Description=StreamBridge cross-platform Discord chat bridge
 After=network-online.target
 Wants=network-online.target
 
@@ -7,9 +7,9 @@ Wants=network-online.target
 Type=simple
 User=CHANGE_ME
 Group=CHANGE_ME
-WorkingDirectory=/opt/ninjabridge
+WorkingDirectory=/opt/stream-bridge
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/ninjabridge/bot-env/bin/python -m ninjabridge
+ExecStart=/opt/stream-bridge/bot-env/bin/python -m streambridge
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

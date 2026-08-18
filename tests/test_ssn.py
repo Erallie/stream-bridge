@@ -2,7 +2,7 @@ import asyncio
 import logging
 import unittest
 
-from ninjabridge.ssn import SsnClient
+from streambridge.ssn import SsnClient
 
 
 class SsnClientTests(unittest.TestCase):

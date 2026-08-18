@@ -2,8 +2,8 @@ import asyncio
 import unittest
 from unittest.mock import Mock
 
-from ninjabridge.direct import TwitchAdapter, YouTubeAdapter, youtube_error_reasons
-from ninjabridge.kick import broadcaster_id, kick_chat_payload
+from streambridge.direct import TwitchAdapter, YouTubeAdapter, youtube_error_reasons
+from streambridge.kick import broadcaster_id, kick_chat_payload
 
 
 class DirectAdapterTests(unittest.TestCase):

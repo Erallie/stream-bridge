@@ -1,4 +1,4 @@
-from ninjabridge.bot import main
+from streambridge.bot import main
 
 if __name__ == "__main__":
     main()

@@ -12,14 +12,14 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from ninjabridge.database import ConfigStore, GuildConfig
-from ninjabridge.direct import DirectHub
-from ninjabridge.kick import KickGateway
-from ninjabridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message, validate_direct_relay_template
-from ninjabridge.relay import ReflectionTracker
-from ninjabridge.ssn import SsnClient
-from ninjabridge.youtube import YouTubeGateway
-from ninjabridge.web import WebGateway
+from streambridge.database import ConfigStore, GuildConfig
+from streambridge.direct import DirectHub
+from streambridge.kick import KickGateway
+from streambridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message, validate_direct_relay_template
+from streambridge.relay import ReflectionTracker
+from streambridge.ssn import SsnClient
+from streambridge.youtube import YouTubeGateway
+from streambridge.web import WebGateway
 
 load_dotenv()
 
@@ -47,7 +47,7 @@ def format_status(channels: str, session: str, ssn_state: str, ssn_targets: str,
     )
 
 
-class NinjaBridge(commands.Bot):
+class StreamBridge(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.none()
         intents.guilds = True
@@ -78,7 +78,7 @@ class NinjaBridge(commands.Bot):
             await self.tree.sync()
 
     async def on_ready(self) -> None:
-        logging.info("NinjaBridge ready as %s", self.user)
+        logging.info("StreamBridge ready as %s", self.user)
         if not self.history_task or self.history_task.done():
             self.history_task = asyncio.create_task(self.maintain_history(), name="history-maintenance")
         for guild_id in self.store.guild_ids():
@@ -112,7 +112,7 @@ class NinjaBridge(commands.Bot):
                 await self.handle_ssn(guild_id, data)
             async def status(connected: bool) -> None:
                 await self.transport_status(guild_id, connected)
-            logger = logging.LoggerAdapter(logging.getLogger("ninjabridge.ssn"), {"guild_id": guild_id})
+            logger = logging.LoggerAdapter(logging.getLogger("streambridge.ssn"), {"guild_id": guild_id})
             self.ssn_clients[guild_id] = SsnClient(self.ssn_url, config.session_id or "", config.relay_targets, logger, received, status)
             self.ssn_clients[guild_id].start()
         return self.ssn_clients[guild_id]
@@ -176,7 +176,7 @@ class NinjaBridge(commands.Bot):
         channel_ids = set(config.channel_ids)
         if config.discord_relay_channel_id:
             channel_ids.add(config.discord_relay_channel_id)
-        text = "-# NinjaBridge switched to Social Stream Ninja transport." if connected else "-# NinjaBridge lost SSN and switched to direct platform connections."
+        text = "-# StreamBridge switched to Social Stream Ninja transport." if connected else "-# StreamBridge lost SSN and switched to direct platform connections."
         if not connected and not self.direct_platforms(guild_id):
             text += "\n-# No platforms have been set up for direct connection. Messages will not be relayed."
         guild = self.get_guild(guild_id)
@@ -225,9 +225,9 @@ class NinjaBridge(commands.Bot):
         hook = self.webhooks.get(channel_id)
         if not hook:
             hooks = await channel.webhooks()
-            hook = next((item for item in hooks if item.name == "NinjaBridge"), None)
+            hook = next((item for item in hooks if item.name == "StreamBridge"), None)
             if not hook:
-                hook = await channel.create_webhook(name="NinjaBridge", reason="Cross-platform relay")
+                hook = await channel.create_webhook(name="StreamBridge", reason="Cross-platform relay")
             self.webhooks[channel_id] = hook
         try:
             await hook.send(content, username=webhook_username(display_name, platform), avatar_url=avatar_url or None, allowed_mentions=discord.AllowedMentions.none(), wait=True)
@@ -273,7 +273,7 @@ class NinjaBridge(commands.Bot):
         await super().close()
 
 
-bot = NinjaBridge()
+bot = StreamBridge()
 admin = app_commands.default_permissions(administrator=True)
 ssn_group = app_commands.Group(
     name="ssn",
@@ -284,7 +284,7 @@ ssn_group = app_commands.Group(
 
 @ssn_group.command(name="connect", description="Connect this server to a Social Stream Ninja session")
 @app_commands.describe(
-    session_id="The SSN session ID that NinjaBridge should join",
+    session_id="The SSN session ID that StreamBridge should join",
     relay_targets="Comma-separated platforms SSN should relay messages to",
 )
 async def ssn_connect(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok") -> None:
@@ -431,7 +431,7 @@ async def switch_messages(i: discord.Interaction, enabled: bool) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "transport_announcements", enabled)
     await i.response.send_message(f"Transport-switch messages: {enabled}.", ephemeral=True)
-@bot.tree.command(name="status", description="Show this server's NinjaBridge connections and relay configuration")
+@bot.tree.command(name="status", description="Show this server's StreamBridge connections and relay configuration")
 @admin
 async def status(i: discord.Interaction) -> None:
     assert i.guild_id
