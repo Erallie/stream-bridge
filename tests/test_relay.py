@@ -27,6 +27,13 @@ class ReflectionTrackerTests(unittest.TestCase):
     def test_normalization_is_stable(self) -> None:
         self.assertEqual(normalize_relay_text(" A\n B  "), "a b")
 
+    def test_kick_emote_name_reflection_is_consumed(self) -> None:
+        tracker = ReflectionTracker()
+        tracker.add("kick", "Erika Gozar said: erallieHeart")
+
+        self.assertTrue(tracker.consume("kick", "Erika Gozar said: erallieHeart"))
+        self.assertFalse(tracker.consume("kick", "Erika Gozar said: erallieHeart"))
+
 
 if __name__ == "__main__":
     unittest.main()

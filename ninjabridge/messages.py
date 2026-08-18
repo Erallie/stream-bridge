@@ -66,7 +66,7 @@ def render_discord_content(
             has_custom_emote = True
             extension = "gif" if animated else "png"
             safe_name = html.escape(emote_name, quote=True)
-            url = f"https://cdn.discordapp.com/emojis/{emote_id}.{extension}?size=48&quality=lossless"
+            url = f"https://cdn.discordapp.com/emojis/{emote_id}.{extension}?size=128&quality=lossless"
             output.append(f'<img class="regular-emote" src="{html.escape(url, quote=True)}" alt=":{safe_name}:" title=":{safe_name}:">')
         elif user_id:
             output.append(html.escape("@" + users.get(user_id, user_id)))
@@ -77,6 +77,32 @@ def render_discord_content(
         cursor = match.end()
     output.append(html.escape(content[cursor:]))
     return "".join(output), has_custom_emote
+
+
+def discord_to_plain_content(
+    content: str,
+    users: dict[str, str] | None = None,
+    roles: dict[str, str] | None = None,
+    channels: dict[str, str] | None = None,
+) -> str:
+    """Convert Discord markup to portable chat text, using bare custom-emote names."""
+    users, roles, channels = users or {}, roles or {}, channels or {}
+    output: list[str] = []
+    cursor = 0
+    for match in DISCORD_TOKEN.finditer(content):
+        output.append(content[cursor:match.start()])
+        _, emote_name, emote_id, user_id, role_id, channel_id = match.groups()
+        if emote_id:
+            output.append(emote_name)
+        elif user_id:
+            output.append("@" + users.get(user_id, user_id))
+        elif role_id:
+            output.append("@" + roles.get(role_id, role_id))
+        else:
+            output.append("#" + channels.get(channel_id or "", channel_id or ""))
+        cursor = match.end()
+    output.append(content[cursor:])
+    return "".join(output)
 
 
 def to_ssn_message(message: discord.Message) -> dict[str, Any]:
@@ -92,7 +118,7 @@ def to_ssn_message(message: discord.Message) -> dict[str, Any]:
     roles = {str(role.id): role.name for role in message.role_mentions}
     channels = {str(channel.id): channel.name for channel in message.channel_mentions}
     rendered, has_custom_emote = render_discord_content(message.content or "", users, roles, channels)
-    plain_text = message.clean_content or message.content or ""
+    plain_text = discord_to_plain_content(message.content or "", users, roles, channels)
 
     return {
         "id": f"discord-{message.id}",
