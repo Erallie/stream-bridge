@@ -14,7 +14,7 @@ class CommandMetadataTests(unittest.TestCase):
 
         self.assertIn("**Discord channels forwarded:**", message)
         self.assertIn("**SSN session:**", message)
-        self.assertIn("**Platforms relayed through SSN:** twitch, youtube", message)
+        self.assertIn("**SSN Platforms:** twitch, youtube", message)
         self.assertIn("**Direct platforms:**", message)
         self.assertIn("**Direct relay message:**", message)
         self.assertIn("**Platform messages received in Discord:**", message)

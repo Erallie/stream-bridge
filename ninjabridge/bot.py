@@ -40,7 +40,7 @@ def format_status(channels: str, session: str, ssn_state: str, ssn_targets: str,
     return (
         f"**Discord channels forwarded:** {channels}\n"
         f"**SSN session:** {session} ({ssn_state})\n"
-        f"**Platforms relayed through SSN:** {ssn_targets}\n"
+        f"**SSN Platforms:** {ssn_targets}\n"
         f"**Direct platforms:** {direct}\n"
         f"**Direct relay message:** `{template}`\n"
         f"**Platform messages received in Discord:** {mirror}"
