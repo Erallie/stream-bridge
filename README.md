@@ -124,8 +124,8 @@ OAuth apps left in Google's **Testing** publishing status may receive refresh to
 Kick sends incoming chat as HTTPS webhooks. NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel makes that one path reachable over Cloudflare's outbound connection. You do not forward port 8765 on the router. These listener values already have safe defaults and do not belong in `.env` unless an advanced installation deliberately changes them.
 
 1. Add a domain to Cloudflare.
-2. Create a Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Its webhook URL will be `https://kick-webhook.YOUR_DOMAIN/kick/webhook`.
-3. Give the application the chat read/write and event-subscription permissions Kick requests. Complete Kick OAuth for the broadcaster/bot account and place its refresh token, client ID, and client secret in the corresponding `KICK_...` `.env` values. NinjaBridge obtains short-lived access tokens automatically.
+2. Create a Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Set its OAuth redirect URL to `http://localhost:8787/callback`, select **Create a bot for this app**, and set its separate webhook URL to `https://kick-webhook.YOUR_DOMAIN/kick/webhook`.
+3. Select only **Read user information**, **Write to Chat feed**, and **Subscribe to events**. Put `KICK_CLIENT_ID` and `KICK_CLIENT_SECRET` in `.env`, then run `python -m ninjabridge.authorize kick` on a computer with a browser. Sign into the Kick broadcaster account that owns the destination channel. The helper uses Kick's required PKCE flow and saves `data/kick-oauth.env`; copy its three lines into the Pi's `.env`, then securely delete the temporary file. NinjaBridge obtains short-lived access tokens automatically and posts using the app's Kick bot identity.
 4. Subscribe the app to Kick's `chat.message.sent` event for the broadcaster. Kick delivers subscribed events to the webhook URL registered for the app.
 5. Install `cloudflared` on the Pi using Cloudflare's current Debian/Raspberry Pi instructions, then authenticate and create a named tunnel:
 

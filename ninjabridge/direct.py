@@ -21,6 +21,10 @@ from ninjabridge.relay import ReflectionTracker
 Handler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
+def kick_chat_payload(text: str) -> dict[str, str]:
+    return {"content": text[:500], "type": "bot"}
+
+
 class TwitchAdapter:
     def __init__(self, channel: str, handler: Handler) -> None:
         self.channel = channel.lstrip("#").lower()
@@ -228,9 +232,7 @@ class KickAdapter:
         return web.Response(status=204)
 
     async def send(self, text: str) -> None:
-        payload: dict[str, Any] = {"content": text[:500], "type": "user"}
-        if self.broadcaster_user_id:
-            payload["broadcaster_user_id"] = int(self.broadcaster_user_id)
+        payload = kick_chat_payload(text)
         session = await self.get_session()
         for attempt in range(2):
             token = await self.oauth.get(force_refresh=attempt == 1)
