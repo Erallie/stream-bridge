@@ -8,11 +8,28 @@ Messages can travel in both directions:
 - Display messages from streaming platforms inside a selected Discord channel.
 - Relay messages between connected streaming platforms.
 - Use normal Discord text channels or the text chat attached to a voice channel.
-- Connect the same Discord channel for both sending and receiving.
 
 StreamBridge can connect directly to Twitch, YouTube, and Kick. It can also integrate with Social Stream Ninja for additional platform support, including TikTok.
 
 ## Main features
+
+- **Cross-platform chat relay** — Relay messages between Discord, Twitch, YouTube, and Kick, with additional platforms such as TikTok available through Social Stream Ninja.
+
+- **Two-way Discord integration** — Send messages from Discord to streaming chats and display streaming-platform messages in Discord.
+
+- **Multiple forwarding channels** — Configure any number of Discord channels as message sources.
+
+- **Native-looking Discord messages** — Messages received from streaming platforms use webhooks to display the chatter’s name, source platform, and profile image when available.
+
+- **Social Stream Ninja integration** — Connect StreamBridge to an SSN session for additional platforms.
+
+- **Automatic transport switching** — Prefer Social Stream Ninja when it is available and return to direct platform connections when SSN goes offline.
+
+- **Custom relay templates** — Customize direct relay messages using `{name}`, `{message}`, and `{platform}` placeholders.
+
+- **Discord custom-emote support** — Render Discord custom emotes through Social Stream Ninja and convert them into readable emote names for direct platform relay.
+
+- **Duplicate and echo prevention** — Track message IDs, delivery history, and recently relayed messages to reduce duplicate posts, reflections, and relay loops.
 
 ### Cross-platform chat relay
 
