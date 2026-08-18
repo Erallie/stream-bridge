@@ -160,6 +160,7 @@ When SSN is connected, NinjaBridge routes through SSN and ignores direct inbound
 - `/forward add`, `/forward remove`, `/forward clear` manage Discord → streaming chat channels.
 - `/receive set`, `/receive clear` manage streaming chats → Discord.
 - `/direct twitch`, `/direct youtube`, `/direct kick` configure direct adapters.
+- `/template` customizes direct relay text with `{name}`, `{message}`, and `{platform}`. An empty value restores `{name} said: {message}`.
 - `/direct disable platform` disables one direct adapter.
 - `/switchmessages` controls transport-switch notices.
 - `/status` displays configuration with the SSN session masked.
@@ -176,3 +177,7 @@ sudo systemctl restart ninjabridge
 ```
 
 The SQLite migrations preserve existing configuration. Direct and SSN messages use platform/message IDs plus delivery records to suppress duplicate forwards.
+
+While SSN is disconnected, every accepted Twitch, YouTube, or Kick message is sent to the configured Discord receive channel and relayed to every other enabled direct platform. Messages in configured Discord forward channels are relayed to every enabled direct platform. The source platform is excluded from its own fan-out, preventing an immediate echo.
+
+Discord role colors and platform-provided username colors are retained as `nameColor` metadata. Twitch, YouTube, and Kick do not render arbitrary HTML or allow a relay bot to color only part of a native chat message, so NinjaBridge sends plain text there instead of exposing markup. SSN can use the Discord role color in its overlay when SSN is connected.

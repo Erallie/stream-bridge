@@ -83,7 +83,7 @@ class TwitchAdapter:
         prefix, text = rest.split(" PRIVMSG ", 1)
         _, message = text.split(" :", 1)
         login = prefix.split("!", 1)[0].lstrip(":")
-        await self.handler({"type": "twitch", "id": tags.get("id", ""), "userid": tags.get("user-id", login), "chatname": tags.get("display-name", login), "username": login, "chatmessage": message, "chatimg": "", "source": "direct"})
+        await self.handler({"type": "twitch", "id": tags.get("id", ""), "userid": tags.get("user-id", login), "chatname": tags.get("display-name", login), "username": login, "chatmessage": message, "chatimg": "", "nameColor": tags.get("color", ""), "source": "direct"})
 
     async def close(self) -> None:
         if self.task:
@@ -198,7 +198,8 @@ class KickAdapter:
             return web.Response(status=401, text="invalid signature")
         if request.headers.get("Kick-Event-Type", "") == "chat.message.sent":
             sender = event.get("sender", {})
-            await self.handler({"type": "kick", "id": event.get("message_id", message_id), "userid": sender.get("user_id", ""), "chatname": sender.get("username", ""), "username": sender.get("username", ""), "chatmessage": event.get("content", ""), "chatimg": sender.get("profile_picture", ""), "source": "direct"})
+            identity = sender.get("identity") or {}
+            await self.handler({"type": "kick", "id": event.get("message_id", message_id), "userid": sender.get("user_id", ""), "chatname": sender.get("username", ""), "username": sender.get("username", ""), "chatmessage": event.get("content", ""), "chatimg": sender.get("profile_picture", ""), "nameColor": identity.get("username_color", ""), "source": "direct"})
         return web.Response(status=204)
 
     async def send(self, text: str) -> None:

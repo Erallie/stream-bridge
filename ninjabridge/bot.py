@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 from ninjabridge.database import ConfigStore, GuildConfig
 from ninjabridge.direct import DirectHub
-from ninjabridge.messages import to_relay_text, to_ssn_message
+from ninjabridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, to_relay_text, to_ssn_message, validate_direct_relay_template
 from ninjabridge.ssn import SsnClient
 
 load_dotenv()
@@ -127,7 +127,8 @@ class NinjaBridge(commands.Bot):
     async def handle_direct(self, guild_id: int, data: dict[str, Any]) -> None:
         accepted = await self.handle_ssn(guild_id, data)
         if accepted:
-            await self.get_direct(guild_id).send(f"{data['chatname']} said: {data['chatmessage']}", str(data.get("type", "")))
+            template = str(self.store.get_setting(str(guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
+            await self.get_direct(guild_id).send(to_relay_text(data, template), str(data.get("type", "")))
 
     async def send_webhook(self, guild_id: int, channel_id: int, display_name: str, avatar_url: str, platform: str, content: str) -> None:
         guild = self.get_guild(guild_id)
@@ -160,7 +161,8 @@ class NinjaBridge(commands.Bot):
                 if self.store.claim_delivery(guild_id, key, target):
                     await ssn.send_chat(target, to_relay_text(payload))
         else:
-            await self.get_direct(message.guild.id).send(to_relay_text(payload))
+            template = str(self.store.get_setting(guild_id, "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
+            await self.get_direct(message.guild.id).send(to_relay_text(payload, template))
 
     async def close(self) -> None:
         await asyncio.gather(*(client.close() for client in self.ssn_clients.values()), return_exceptions=True)
@@ -275,6 +277,20 @@ async def direct_disable(i: discord.Interaction, platform: str) -> None:
 bot.tree.add_command(direct_group)
 
 
+@bot.tree.command(name="template", description="Set the relay message used while SSN is disconnected")
+@admin
+async def relay_template(i: discord.Interaction, template: str = "") -> None:
+    assert i.guild_id
+    try:
+        checked = validate_direct_relay_template(template)
+    except ValueError as error:
+        await i.response.send_message(str(error), ephemeral=True)
+        return
+    bot.store.set_setting(str(i.guild_id), "direct_relay_template", checked)
+    example = to_relay_text({"chatname": "Alex", "chatmessage": "Hello!", "type": "twitch"}, checked)
+    await i.response.send_message(f"Direct relay message saved. Example:\n{example}", ephemeral=True)
+
+
 @bot.tree.command(name="switchmessages", description="Enable or disable transport-switch messages")
 @admin
 async def switch_messages(i: discord.Interaction, enabled: bool) -> None:
@@ -292,7 +308,8 @@ async def status(i: discord.Interaction) -> None:
     ssn_state = "connected" if i.guild_id in bot.ssn_clients and bot.ssn_clients[i.guild_id].connected else "disconnected"
     hub = bot.direct_hubs.get(i.guild_id)
     direct = ", ".join(hub.adapters if hub else []) or "none"
-    await i.response.send_message(f"Discord channels forwarded: {channels}\nSSN session: {session} ({ssn_state})\nDirect platforms: {direct}\nPlatform messages received in Discord: {mirror}", ephemeral=True)
+    template = str(bot.store.get_setting(str(i.guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
+    await i.response.send_message(f"Discord channels forwarded: {channels}\nSSN session: {session} ({ssn_state})\nDirect platforms: {direct}\nDirect relay message: `{template}`\nPlatform messages received in Discord: {mirror}", ephemeral=True)
 
 
 @bot.tree.command(name="disable", description="Disable SSN forwarding")
