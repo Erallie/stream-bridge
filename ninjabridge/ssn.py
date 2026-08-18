@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
+import secrets
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -37,6 +39,17 @@ class SsnClient:
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)
         self.stopping = False
         self.task: asyncio.Task[None] | None = None
+
+    async def _set_connected(self, connected: bool) -> None:
+        if self.connected == connected:
+            return
+        self.connected = connected
+        if connected:
+            self.logger.info("SSN host responded; using SSN transport")
+        else:
+            self.logger.warning("SSN host stopped responding; using direct transport")
+        if self.on_status:
+            await self.on_status(connected)
 
     def start(self) -> None:
         if not self.task or self.task.done():
@@ -83,6 +96,28 @@ class SsnClient:
                 except Exception:
                     self.logger.exception("Failed to process SSN message")
 
+    @staticmethod
+    def _is_probe_response(raw: Any, token: str) -> bool:
+        try:
+            data = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return False
+        callback = data.get("callback") if isinstance(data, dict) else None
+        return isinstance(callback, dict) and callback.get("get") == token
+
+    async def _probe_host(self, socket: Any) -> None:
+        interval = max(5.0, float(os.getenv("SSN_HOST_PROBE_INTERVAL", "15")))
+        timeout = max(3.0, float(os.getenv("SSN_HOST_PROBE_TIMEOUT", "10")))
+        while not self.stopping:
+            token = f"ninjabridge-{secrets.token_hex(8)}"
+            await socket.send(json.dumps({"action": "ninjabridgePresence", "get": token}, separators=(",", ":")))
+            while True:
+                raw = await asyncio.wait_for(socket.recv(), timeout=timeout)
+                if self._is_probe_response(raw, token):
+                    break
+            await self._set_connected(True)
+            await asyncio.sleep(interval)
+
     async def _run(self) -> None:
         attempt = 0
         while not self.stopping:
@@ -95,24 +130,32 @@ class SsnClient:
                     ping_timeout=15,
                     close_timeout=5,
                 ) as socket:
-                    join: dict[str, Any] = {"join": self.session_id, "in": 4, "out": 1}
-                    if self.password:
-                        join["password"] = self.password
-                    await socket.send(json.dumps(join))
-                    attempt = 0
-                    self.connected = True
-                    self.logger.info("Connected to SSN channels 4→1")
-                    if self.on_status:
-                        await self.on_status(True)
-                    sender = asyncio.create_task(self._sender(socket), name="ssn-sender")
-                    receiver = asyncio.create_task(self._receiver(socket), name="ssn-receiver")
-                    done, pending = await asyncio.wait((sender, receiver), return_when=asyncio.FIRST_COMPLETED)
-                    for task in pending:
-                        task.cancel()
-                    results = await asyncio.gather(*done, *pending, return_exceptions=True)
-                    for result in results:
-                        if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
-                            raise result
+                    async with websockets.connect(
+                        self.url,
+                        open_timeout=15,
+                        ping_interval=25,
+                        ping_timeout=15,
+                        close_timeout=5,
+                    ) as probe_socket:
+                        join: dict[str, Any] = {"join": self.session_id, "in": 4, "out": 1}
+                        probe_join: dict[str, Any] = {"join": self.session_id, "in": 2, "out": 1}
+                        if self.password:
+                            join["password"] = self.password
+                            probe_join["password"] = self.password
+                        await socket.send(json.dumps(join))
+                        await probe_socket.send(json.dumps(probe_join))
+                        attempt = 0
+                        self.logger.info("Connected to SSN relay; waiting for the SSN host")
+                        sender = asyncio.create_task(self._sender(socket), name="ssn-sender")
+                        receiver = asyncio.create_task(self._receiver(socket), name="ssn-receiver")
+                        probe = asyncio.create_task(self._probe_host(probe_socket), name="ssn-host-probe")
+                        done, pending = await asyncio.wait((sender, receiver, probe), return_when=asyncio.FIRST_COMPLETED)
+                        for task in pending:
+                            task.cancel()
+                        results = await asyncio.gather(*done, *pending, return_exceptions=True)
+                        for result in results:
+                            if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+                                raise result
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -121,10 +164,7 @@ class SsnClient:
                 self.logger.exception("SSN connection failed; retrying in %.1fs", delay)
                 await asyncio.sleep(delay)
             finally:
-                if self.connected:
-                    self.connected = False
-                    if self.on_status:
-                        await self.on_status(False)
+                await self._set_connected(False)
 
     async def close(self) -> None:
         self.stopping = True

@@ -161,7 +161,7 @@ Run `/setup session_id:YOUR_SESSION relay_targets:twitch,youtube,kick,tiktok`. I
 
 In SSN enable remote API control and the option that routes API chat to normal dock/overlay connections. Enable SSN's built-in relay when SSN should own platform-to-platform relay. NinjaBridge ignores reflections, bot messages, its Discord webhook messages, and already-processed event IDs to prevent loops.
 
-When SSN is connected, NinjaBridge routes through SSN and ignores direct inbound copies. When it disconnects, the direct Twitch, YouTube, and Kick adapters resume ownership. TikTok remains SSN-only because TikTok does not offer a general public LIVE-chat read/write API for this use.
+When SSN is connected, NinjaBridge routes through SSN and ignores direct inbound copies. NinjaBridge verifies that the SSN extension/app itself is responding, rather than treating an otherwise empty cloud room as connected. If the host closes or stops responding, direct Twitch, YouTube, and Kick adapters resume ownership automatically; the default detection window is about 25 seconds and can be tuned with `SSN_HOST_PROBE_INTERVAL` and `SSN_HOST_PROBE_TIMEOUT`. TikTok remains SSN-only because TikTok does not offer a general public LIVE-chat read/write API for this use.
 
 ## Commands
 
