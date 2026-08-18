@@ -104,16 +104,16 @@ Create one Google OAuth application for NinjaBridge. Each Discord server then pr
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project.
 2. Enable **YouTube Data API v3**.
-3. Configure the OAuth consent screen. For a testing app, add the Google account that owns the posting YouTube channel as a test user.
+3. Configure the OAuth audience as **External**, complete the app branding, and publish the app **In production** so any Google account can authorize it.
 4. Create an OAuth 2.0 Client ID of type **Web application**.
 5. Add `https://ninjabridge-webhook.YOUR_DOMAIN/youtube/oauth/callback` as an authorized redirect URI. It must exactly match `YOUTUBE_OAUTH_REDIRECT_URI` in `.env`.
 6. Put only the app's client ID, client secret, and redirect URI in `.env`. Do not put a YouTube refresh token there.
-7. Add every Google account that will authorize while the consent screen is in **Testing** to the app's test-user list.
+7. Add the `youtube.force-ssl` scope under **Data Access**, then submit the production app for Google OAuth verification. This scope is required to read and post live-chat messages. Before verification is approved, users may see Google's unverified-app warning and the project is subject to Google's new-user cap.
 8. Restart NinjaBridge. In each Discord server, an administrator runs `/direct youtube` and opens the private link while signed into the YouTube account whose channel should be connected.
 
 NinjaBridge automatically discovers that account's active livestream chat. Authorization can be completed before going live; NinjaBridge keeps checking until an active chat exists.
 
-OAuth apps left in Google's **Testing** publishing status may receive refresh tokens that expire after seven days. Move the consent screen to Production when appropriate; unverified personal apps can still show a warning and have user limits.
+Do not leave the public NinjaBridge app in **Testing** or maintain a test-user allowlist. Production publishing makes it available to any Google account; verification removes the unverified-app warning and new-user cap for the requested scope.
 
 ## Direct Kick without opening router ports
 
