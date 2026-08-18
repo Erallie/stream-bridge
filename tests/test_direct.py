@@ -1,6 +1,6 @@
 import unittest
 
-from ninjabridge.direct import kick_chat_payload
+from ninjabridge.kick import broadcaster_id, kick_chat_payload
 
 
 class DirectAdapterTests(unittest.TestCase):
@@ -10,6 +10,12 @@ class DirectAdapterTests(unittest.TestCase):
         self.assertEqual(payload["type"], "bot")
         self.assertEqual(len(payload["content"]), 500)
         self.assertNotIn("broadcaster_user_id", payload)
+
+    def test_kick_events_expose_their_broadcaster_for_routing(self) -> None:
+        event = {"broadcaster": {"user_id": 12345}}
+
+        self.assertEqual(broadcaster_id(event), "12345")
+        self.assertEqual(broadcaster_id({}), "")
 
 
 if __name__ == "__main__":

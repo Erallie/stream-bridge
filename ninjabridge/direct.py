@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import logging
 import os
 import random
@@ -11,18 +9,11 @@ from typing import Any
 
 import aiohttp
 import websockets
-from aiohttp import web
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 
 from ninjabridge.oauth import OAuthToken
 from ninjabridge.relay import ReflectionTracker
 
 Handler = Callable[[dict[str, Any]], Awaitable[None]]
-
-
-def kick_chat_payload(text: str) -> dict[str, str]:
-    return {"content": text[:500], "type": "bot"}
 
 
 class TwitchAdapter:
@@ -174,86 +165,8 @@ class YouTubeAdapter:
             await self.session.close()
 
 
-class KickAdapter:
-    def __init__(self, broadcaster_user_id: str, handler: Handler) -> None:
-        self.broadcaster_user_id = broadcaster_user_id
-        self.handler = handler
-        self.oauth = OAuthToken("KICK", "https://id.kick.com/oauth/token")
-        self.runner: web.AppRunner | None = None
-        self.public_key: Any = None
-        self.task: asyncio.Task[None] | None = None
-        self.session: aiohttp.ClientSession | None = None
-
-    def start(self) -> None:
-        self.task = asyncio.create_task(self.run(), name="kick-webhook")
-
-    async def get_session(self) -> aiohttp.ClientSession:
-        if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
-        return self.session
-
-    async def run(self) -> None:
-        if not self.oauth.configured:
-            logging.error("Direct Kick requires Kick OAuth credentials")
-            return
-        try:
-            session = await self.get_session()
-            async with session.get("https://api.kick.com/public/v1/public-key") as response:
-                body = await response.json(content_type=None)
-                pem = body.get("data", {}).get("public_key") or body.get("public_key") or body.get("data")
-                if response.status >= 400 or not isinstance(pem, str):
-                    raise RuntimeError(f"Could not load Kick public key (HTTP {response.status})")
-            self.public_key = serialization.load_pem_public_key(pem.encode())
-            app = web.Application(client_max_size=1024 * 1024)
-            app.router.add_post(os.getenv("KICK_WEBHOOK_PATH", "/kick/webhook"), self.webhook)
-            self.runner = web.AppRunner(app, access_log=logging.getLogger("ninjabridge.kick.http"))
-            await self.runner.setup()
-            await web.TCPSite(self.runner, os.getenv("KICK_WEBHOOK_HOST", "127.0.0.1"), int(os.getenv("KICK_WEBHOOK_PORT", "8765"))).start()
-            logging.info("Kick webhook receiver listening on the loopback interface")
-        except Exception:
-            logging.exception("Direct Kick webhook receiver could not start")
-
-    async def webhook(self, request: web.Request) -> web.Response:
-        raw = await request.read()
-        message_id = request.headers.get("Kick-Event-Message-Id", "")
-        timestamp = request.headers.get("Kick-Event-Message-Timestamp", "")
-        signature = request.headers.get("Kick-Event-Signature", "")
-        try:
-            signed = f"{message_id}.{timestamp}.".encode() + raw
-            self.public_key.verify(base64.b64decode(signature), signed, padding.PKCS1v15(), hashes.SHA256())
-            event = json.loads(raw)
-        except Exception:
-            logging.warning("Rejected a Kick webhook with an invalid signature")
-            return web.Response(status=401, text="invalid signature")
-        if request.headers.get("Kick-Event-Type", "") == "chat.message.sent":
-            sender = event.get("sender", {})
-            identity = sender.get("identity") or {}
-            await self.handler({"type": "kick", "id": event.get("message_id", message_id), "userid": sender.get("user_id", ""), "chatname": sender.get("username", ""), "username": sender.get("username", ""), "chatmessage": event.get("content", ""), "chatimg": sender.get("profile_picture", ""), "nameColor": identity.get("username_color", ""), "source": "direct"})
-        return web.Response(status=204)
-
-    async def send(self, text: str) -> None:
-        payload = kick_chat_payload(text)
-        session = await self.get_session()
-        for attempt in range(2):
-            token = await self.oauth.get(force_refresh=attempt == 1)
-            async with session.post("https://api.kick.com/public/v1/chat", headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json=payload) as response:
-                if response.status != 401 or attempt:
-                    if response.status >= 400:
-                        raise RuntimeError(f"Kick send failed: HTTP {response.status}")
-                    return
-
-    async def close(self) -> None:
-        if self.task:
-            self.task.cancel()
-            await asyncio.gather(self.task, return_exceptions=True)
-        if self.runner:
-            await self.runner.cleanup()
-        if self.session and not self.session.closed:
-            await self.session.close()
-
-
 class DirectHub:
-    def __init__(self, handler: Handler, twitch_channel: str = "", youtube_live_chat_id: str = "", kick_broadcaster_user_id: str = "") -> None:
+    def __init__(self, handler: Handler, twitch_channel: str = "", youtube_live_chat_id: str = "") -> None:
         self.adapters: dict[str, Any] = {}
         self.reflections = ReflectionTracker()
 
@@ -269,8 +182,6 @@ class DirectHub:
             self.adapters["twitch"] = TwitchAdapter(twitch_channel, platform_handler("twitch"))
         if youtube_live_chat_id:
             self.adapters["youtube"] = YouTubeAdapter(youtube_live_chat_id, platform_handler("youtube"))
-        if kick_broadcaster_user_id:
-            self.adapters["kick"] = KickAdapter(kick_broadcaster_user_id, platform_handler("kick"))
 
     def start(self) -> None:
         for adapter in self.adapters.values():

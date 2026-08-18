@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from ninjabridge.database import ConfigStore, GuildConfig
 from ninjabridge.direct import DirectHub
+from ninjabridge.kick import KickGateway
 from ninjabridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, to_relay_text, to_ssn_message, validate_direct_relay_template
 from ninjabridge.ssn import SsnClient
 
@@ -31,6 +32,7 @@ class NinjaBridge(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix=commands.when_mentioned, intents=intents, application_id=int(os.environ["DISCORD_CLIENT_ID"]))
         self.store = ConfigStore(os.getenv("DATABASE_PATH", "./data/bot.sqlite"))
+        self.kick = KickGateway(self.store, self.handle_kick_event, self.handle_kick_authorized)
         self.ssn_clients: dict[int, SsnClient] = {}
         self.direct_hubs: dict[int, DirectHub] = {}
         self.webhooks: dict[int, discord.Webhook] = {}
@@ -38,6 +40,7 @@ class NinjaBridge(commands.Bot):
         self.ssn_url = os.getenv("SSN_WEBSOCKET_URL", "wss://io.socialstream.ninja")
 
     async def setup_hook(self) -> None:
+        await self.kick.start()
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
             guild = discord.Object(id=int(guild_id))
@@ -98,7 +101,6 @@ class NinjaBridge(commands.Bot):
                 received,
                 str(self.store.get_setting(guild, "direct_twitch_channel", "")),
                 str(self.store.get_setting(guild, "direct_youtube_live_chat_id", "")),
-                str(self.store.get_setting(guild, "direct_kick_broadcaster_user_id", "")),
             )
             self.direct_hubs[guild_id] = hub
             hub.start()
@@ -109,6 +111,23 @@ class NinjaBridge(commands.Bot):
         if hub:
             await hub.close()
         self.get_direct(guild_id)
+
+    async def handle_kick_event(self, guild_id: int, data: dict[str, Any]) -> None:
+        client = self.ssn_clients.get(guild_id)
+        if not client or not client.connected:
+            await self.handle_direct(guild_id, data)
+
+    async def handle_kick_authorized(self, guild_id: int, username: str) -> None:
+        logging.info("Discord guild %s authorized Kick channel %s", guild_id, username)
+
+    async def send_direct(self, guild_id: int, text: str, exclude: str = "") -> None:
+        tasks = [self.get_direct(guild_id).send(text, exclude)]
+        if exclude != "kick" and self.kick.connected(guild_id):
+            tasks.append(self.kick.send(guild_id, text))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                logging.error("Direct relay send failed: %s", result)
 
     async def transport_status(self, guild_id: int, connected: bool) -> None:
         if not self.store.get_setting(str(guild_id), "transport_announcements", True):
@@ -148,7 +167,7 @@ class NinjaBridge(commands.Bot):
         accepted = await self.handle_ssn(guild_id, data)
         if accepted:
             template = str(self.store.get_setting(str(guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
-            await self.get_direct(guild_id).send(to_relay_text(data, template), str(data.get("type", "")))
+            await self.send_direct(guild_id, to_relay_text(data, template), str(data.get("type", "")))
 
     async def send_webhook(self, guild_id: int, channel_id: int, display_name: str, avatar_url: str, platform: str, content: str) -> None:
         guild = self.get_guild(guild_id)
@@ -189,7 +208,7 @@ class NinjaBridge(commands.Bot):
                     await ssn.send_chat(target, to_relay_text(payload))
         else:
             template = str(self.store.get_setting(guild_id, "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
-            await self.get_direct(message.guild.id).send(to_relay_text(payload, template))
+            await self.send_direct(message.guild.id, to_relay_text(payload, template))
 
     async def close(self) -> None:
         if self.history_task:
@@ -197,6 +216,7 @@ class NinjaBridge(commands.Bot):
             await asyncio.gather(self.history_task, return_exceptions=True)
         await asyncio.gather(*(client.close() for client in self.ssn_clients.values()), return_exceptions=True)
         await asyncio.gather(*(hub.close() for hub in self.direct_hubs.values()), return_exceptions=True)
+        await self.kick.close()
         self.store.close()
         await super().close()
 
@@ -207,6 +227,11 @@ admin = app_commands.default_permissions(administrator=True)
 
 @bot.tree.command(name="setup", description="Connect this server to Social Stream Ninja")
 @admin
+@app_commands.describe(
+    session_id="The SSN session ID that NinjaBridge should join",
+    relay_targets="Comma-separated platforms SSN should relay messages to",
+    password="The SSN session password, if the session is protected",
+)
 async def setup(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok", password: str = "") -> None:
     assert i.guild_id
     bot.store.set_session(str(i.guild_id), session_id.strip(), parse_list(relay_targets))
@@ -218,41 +243,44 @@ async def setup(i: discord.Interaction, session_id: str, relay_targets: str = "t
     await i.response.send_message("SSN session and relay targets saved.", ephemeral=True)
 
 
-forward_group = app_commands.Group(name="forward", description="Choose Discord channels to forward to SSN", default_permissions=discord.Permissions(administrator=True))
+forward_group = app_commands.Group(name="forward", description="Choose Discord channels whose messages are sent to streaming chats", default_permissions=discord.Permissions(administrator=True))
 
 
-@forward_group.command(name="add")
+@forward_group.command(name="add", description="Add a Discord text channel or voice-channel chat as a relay source")
+@app_commands.describe(channel="The text channel or voice-channel side chat to forward from")
 async def channel_add(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
     changed = bot.store.add_channel(str(i.guild_id), str(channel.id))
     await i.response.send_message("Discord channel will now be forwarded to SSN." if changed else "That channel is already forwarded to SSN.", ephemeral=True)
 
 
-@forward_group.command(name="remove")
+@forward_group.command(name="remove", description="Stop forwarding messages from one Discord channel")
+@app_commands.describe(channel="The configured text channel or voice-channel side chat to remove")
 async def channel_remove(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
     changed = bot.store.remove_channel(str(i.guild_id), str(channel.id))
     await i.response.send_message("Discord channel will no longer be forwarded to SSN." if changed else "That channel was not being forwarded.", ephemeral=True)
 
 
-@forward_group.command(name="clear")
+@forward_group.command(name="clear", description="Remove every configured Discord forwarding channel")
 async def channel_clear(i: discord.Interaction) -> None:
     assert i.guild_id
     await i.response.send_message(f"Stopped forwarding {bot.store.clear_channels(str(i.guild_id))} Discord channel(s) to SSN.", ephemeral=True)
 
 
 bot.tree.add_command(forward_group)
-receive_group = app_commands.Group(name="receive", description="Choose where Discord receives SSN platform messages", default_permissions=discord.Permissions(administrator=True))
+receive_group = app_commands.Group(name="receive", description="Choose where Discord receives messages from streaming platforms", default_permissions=discord.Permissions(administrator=True))
 
 
-@receive_group.command(name="set")
+@receive_group.command(name="set", description="Choose the Discord channel that receives streaming chat messages")
+@app_commands.describe(channel="The text channel or voice-channel side chat that should receive messages")
 async def receive_set(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", str(channel.id))
     await i.response.send_message(f"SSN platform messages will now be mirrored to {channel.mention}.", ephemeral=True)
 
 
-@receive_group.command(name="clear")
+@receive_group.command(name="clear", description="Stop sending streaming chat messages into Discord")
 async def receive_clear(i: discord.Interaction) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", None)
@@ -264,7 +292,8 @@ bot.tree.add_command(receive_group)
 direct_group = app_commands.Group(name="direct", description="Configure direct platform connections", default_permissions=discord.Permissions(administrator=True))
 
 
-@direct_group.command(name="twitch")
+@direct_group.command(name="twitch", description="Connect directly to a Twitch channel when SSN is unavailable")
+@app_commands.describe(channel="The Twitch channel name, with or without the leading #")
 async def direct_twitch(i: discord.Interaction, channel: str) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "direct_twitch_channel", channel.lstrip("#"))
@@ -272,7 +301,8 @@ async def direct_twitch(i: discord.Interaction, channel: str) -> None:
     await i.response.send_message("Direct Twitch channel saved. Credentials are read from .env.", ephemeral=True)
 
 
-@direct_group.command(name="youtube")
+@direct_group.command(name="youtube", description="Connect directly to one YouTube livestream chat")
+@app_commands.describe(live_chat_id="The broadcast's activeLiveChatId, not its video ID")
 async def direct_youtube(i: discord.Interaction, live_chat_id: str) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "direct_youtube_live_chat_id", live_chat_id)
@@ -280,36 +310,37 @@ async def direct_youtube(i: discord.Interaction, live_chat_id: str) -> None:
     await i.response.send_message("Direct YouTube live-chat ID saved. OAuth is read from .env.", ephemeral=True)
 
 
-@direct_group.command(name="kick")
-async def direct_kick(i: discord.Interaction, broadcaster_user_id: str) -> None:
+@direct_group.command(name="kick", description="Privately authorize this server's broadcaster account with Kick")
+async def direct_kick(i: discord.Interaction) -> None:
     assert i.guild_id
-    if not broadcaster_user_id.isdecimal():
-        await i.response.send_message("The Kick broadcaster user ID must contain only numbers.", ephemeral=True)
+    try:
+        url = bot.kick.authorization_url(i.guild_id, i.user.id)
+    except RuntimeError as error:
+        await i.response.send_message(str(error), ephemeral=True)
         return
-    bot.store.set_setting(str(i.guild_id), "direct_kick_broadcaster_user_id", broadcaster_user_id)
-    await bot.reset_direct(i.guild_id)
-    await i.response.send_message("Direct Kick saved. OAuth and the webhook receiver are read from .env.", ephemeral=True)
+    await i.response.send_message(f"[Authorize this server's Kick channel]({url})\nThis private link expires in 10 minutes.", ephemeral=True)
 
 
-@direct_group.command(name="disable")
+@direct_group.command(name="disable", description="Disable one direct streaming-platform connection")
+@app_commands.describe(platform="The direct connection to disable: twitch, youtube, or kick")
 async def direct_disable(i: discord.Interaction, platform: str) -> None:
     assert i.guild_id
     platform = platform.casefold()
     if platform not in {"twitch", "youtube", "kick"}:
         await i.response.send_message("Platform must be twitch, youtube, or kick.", ephemeral=True)
         return
-    suffix = {"twitch": "channel", "youtube": "live_chat_id", "kick": "broadcaster_user_id"}[platform]
-    bot.store.set_setting(str(i.guild_id), f"direct_{platform}_{suffix}", "")
+    if platform == "kick":
+        await bot.kick.disable(i.guild_id)
+    else:
+        suffix = {"twitch": "channel", "youtube": "live_chat_id"}[platform]
+        bot.store.set_setting(str(i.guild_id), f"direct_{platform}_{suffix}", "")
     await bot.reset_direct(i.guild_id)
     await i.response.send_message(f"Direct {platform.title()} disabled.", ephemeral=True)
 
 
-bot.tree.add_command(direct_group)
-
-
-@bot.tree.command(name="template", description="Set the relay message used while SSN is disconnected")
-@admin
-async def relay_template(i: discord.Interaction, template: str = "") -> None:
+@direct_group.command(name="message", description="Set the message format used for direct relays when SSN is unavailable")
+@app_commands.describe(template="Format using {name}, {message}, and optionally {platform}; leave blank to reset")
+async def direct_message(i: discord.Interaction, template: str = "") -> None:
     assert i.guild_id
     try:
         checked = validate_direct_relay_template(template)
@@ -321,13 +352,17 @@ async def relay_template(i: discord.Interaction, template: str = "") -> None:
     await i.response.send_message(f"Direct relay message saved. Example:\n{example}", ephemeral=True)
 
 
+bot.tree.add_command(direct_group)
+
+
 @bot.tree.command(name="switchmessages", description="Enable or disable transport-switch messages")
 @admin
+@app_commands.describe(enabled="Whether Discord should announce switches between SSN and direct mode")
 async def switch_messages(i: discord.Interaction, enabled: bool) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "transport_announcements", enabled)
     await i.response.send_message(f"Transport-switch messages: {enabled}.", ephemeral=True)
-@bot.tree.command(name="status", description="Show NinjaBridge configuration")
+@bot.tree.command(name="status", description="Show this server's NinjaBridge connections and relay configuration")
 @admin
 async def status(i: discord.Interaction) -> None:
     assert i.guild_id
@@ -337,12 +372,15 @@ async def status(i: discord.Interaction) -> None:
     mirror = f"<#{c.discord_relay_channel_id}>" if c and c.discord_relay_channel_id else "off"
     ssn_state = "connected" if i.guild_id in bot.ssn_clients and bot.ssn_clients[i.guild_id].connected else "disconnected"
     hub = bot.direct_hubs.get(i.guild_id)
-    direct = ", ".join(hub.adapters if hub else []) or "none"
+    direct_platforms = list(hub.adapters if hub else [])
+    if bot.kick.connected(i.guild_id):
+        direct_platforms.append(f"kick ({bot.kick.username(i.guild_id)})")
+    direct = ", ".join(direct_platforms) or "none"
     template = str(bot.store.get_setting(str(i.guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
     await i.response.send_message(f"Discord channels forwarded: {channels}\nSSN session: {session} ({ssn_state})\nDirect platforms: {direct}\nDirect relay message: `{template}`\nPlatform messages received in Discord: {mirror}", ephemeral=True)
 
 
-@bot.tree.command(name="disable", description="Disable SSN forwarding")
+@bot.tree.command(name="disable", description="Disconnect this server from SSN without removing direct connections")
 @admin
 async def disable(i: discord.Interaction) -> None:
     assert i.guild_id

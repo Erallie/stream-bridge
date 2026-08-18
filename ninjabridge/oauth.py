@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import aiohttp
@@ -46,18 +47,28 @@ def _persist_rotated_token(prefix: str, previous: str, current: str) -> None:
 class OAuthToken:
     """An access token that refreshes itself without logging secrets."""
 
-    def __init__(self, prefix: str, token_url: str) -> None:
+    def __init__(
+        self,
+        prefix: str,
+        token_url: str,
+        *,
+        refresh_token: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
+        on_refresh: Callable[[str], None] | None = None,
+    ) -> None:
         self.prefix = prefix
         self.token_url = token_url
-        self.access_token = os.getenv(f"{prefix}_ACCESS_TOKEN", "").removeprefix("oauth:")
-        configured_refresh = os.getenv(f"{prefix}_REFRESH_TOKEN", "")
-        saved = _read_state().get(prefix, {})
+        self.access_token = (os.getenv(f"{prefix}_ACCESS_TOKEN", "") if refresh_token is None else "").removeprefix("oauth:")
+        configured_refresh = os.getenv(f"{prefix}_REFRESH_TOKEN", "") if refresh_token is None else refresh_token
+        saved = _read_state().get(prefix, {}) if refresh_token is None else {}
         if configured_refresh and configured_refresh in {saved.get("supersedes"), saved.get("refresh_token")}:
             self.refresh_token = saved.get("refresh_token", configured_refresh)
         else:
             self.refresh_token = configured_refresh
-        self.client_id = os.getenv(f"{prefix}_CLIENT_ID", "")
-        self.client_secret = os.getenv(f"{prefix}_CLIENT_SECRET", "")
+        self.client_id = os.getenv(f"{prefix}_CLIENT_ID", "") if client_id is None else client_id
+        self.client_secret = os.getenv(f"{prefix}_CLIENT_SECRET", "") if client_secret is None else client_secret
+        self.on_refresh = on_refresh
         self.expires_at = 0.0
         self.lock = asyncio.Lock()
 
@@ -86,7 +97,10 @@ class OAuthToken:
                 previous = self.refresh_token
                 self.refresh_token = str(body["refresh_token"])
                 if self.refresh_token != previous:
-                    _persist_rotated_token(self.prefix, previous, self.refresh_token)
+                    if self.on_refresh:
+                        self.on_refresh(self.refresh_token)
+                    else:
+                        _persist_rotated_token(self.prefix, previous, self.refresh_token)
                     logging.info("Persisted rotated %s refresh token", self.prefix)
             self.expires_at = time.time() + int(body.get("expires_in", 3600))
             logging.info("Refreshed %s access token", self.prefix)

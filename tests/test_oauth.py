@@ -34,6 +34,19 @@ class OAuthStateTests(unittest.TestCase):
 
             self.assertEqual(token.refresh_token, "new")
 
+    def test_per_account_token_does_not_reuse_global_access_token(self) -> None:
+        with patch.dict(os.environ, {"KICK_ACCESS_TOKEN": "wrong-account"}, clear=True):
+            token = OAuthToken(
+                "KICK",
+                "https://id.kick.com/oauth/token",
+                refresh_token="per-guild-refresh",
+                client_id="client",
+                client_secret="secret",
+            )
+
+        self.assertEqual(token.access_token, "")
+        self.assertEqual(token.refresh_token, "per-guild-refresh")
+
 
 if __name__ == "__main__":
     unittest.main()

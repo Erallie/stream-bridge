@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
-import hashlib
 import http.server
 import json
 import os
@@ -31,20 +29,7 @@ PROVIDERS = {
         "scope": "https://www.googleapis.com/auth/youtube.force-ssl",
         "prefix": "YOUTUBE",
     },
-    "kick": {
-        "authorize": "https://id.kick.com/oauth/authorize",
-        "token": "https://id.kick.com/oauth/token",
-        "scope": "user:read chat:write events:subscribe",
-        "prefix": "KICK",
-    },
 }
-
-
-def create_pkce_pair() -> tuple[str, str]:
-    verifier = secrets.token_urlsafe(64)
-    digest = hashlib.sha256(verifier.encode("ascii")).digest()
-    challenge = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
-    return verifier, challenge
 
 
 def exchange(url: str, form: dict[str, str]) -> dict[str, Any]:
@@ -82,7 +67,6 @@ def main() -> None:
         raise SystemExit(f"Set {prefix}_CLIENT_ID and {prefix}_CLIENT_SECRET in .env first.")
     redirect_uri = f"http://localhost:{args.port}/callback"
     state = secrets.token_urlsafe(32)
-    code_verifier = ""
     result: dict[str, str] = {}
     ready = threading.Event()
 
@@ -115,9 +99,6 @@ def main() -> None:
     }
     if args.provider == "youtube":
         params.update({"access_type": "offline", "prompt": "consent"})
-    elif args.provider == "kick":
-        code_verifier, code_challenge = create_pkce_pair()
-        params.update({"code_challenge": code_challenge, "code_challenge_method": "S256"})
     url = provider["authorize"] + "?" + urllib.parse.urlencode(params)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Callback)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -131,10 +112,7 @@ def main() -> None:
         raise SystemExit(f"Authorization failed: {result['error']}")
     if not result.get("code"):
         raise SystemExit("No authorization response arrived within five minutes.")
-    form = {"client_id": client_id, "client_secret": client_secret, "code": result["code"], "grant_type": "authorization_code", "redirect_uri": redirect_uri}
-    if code_verifier:
-        form["code_verifier"] = code_verifier
-    body = exchange(provider["token"], form)
+    body = exchange(provider["token"], {"client_id": client_id, "client_secret": client_secret, "code": result["code"], "grant_type": "authorization_code", "redirect_uri": redirect_uri})
     if not body.get("refresh_token"):
         raise SystemExit(f"{args.provider.title()} did not return a refresh token. Revoke access and authorize again.")
     path = save_tokens(prefix, client_id, client_secret, body)

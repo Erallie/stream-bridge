@@ -121,13 +121,20 @@ OAuth apps left in Google's **Testing** publishing status may receive refresh to
 
 ## Direct Kick without opening router ports
 
-Kick sends incoming chat as HTTPS webhooks. NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel makes that one path reachable over Cloudflare's outbound connection. You do not forward port 8765 on the router. These listener values already have safe defaults and do not belong in `.env` unless an advanced installation deliberately changes them.
+Kick sends incoming chat as HTTPS webhooks and returns each broadcaster's OAuth authorization through HTTPS. NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel exposes only those two paths over an outbound connection. You do not forward a router port.
 
 1. Add a domain to Cloudflare.
-2. Create a Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Set its OAuth redirect URL to `http://localhost:8787/callback`, select **Create a bot for this app**, and set its separate webhook URL to `https://kick-webhook.YOUR_DOMAIN/kick/webhook`.
-3. Select only **Read user information**, **Write to Chat feed**, and **Subscribe to events**. Put `KICK_CLIENT_ID` and `KICK_CLIENT_SECRET` in `.env`, then run `python -m ninjabridge.authorize kick` on a computer with a browser. Sign into the Kick broadcaster account that owns the destination channel. The helper uses Kick's required PKCE flow and saves `data/kick-oauth.env`; copy its three lines into the Pi's `.env`, then securely delete the temporary file. NinjaBridge obtains short-lived access tokens automatically and posts using the app's Kick bot identity.
-4. Subscribe the app to Kick's `chat.message.sent` event for the broadcaster. Kick delivers subscribed events to the webhook URL registered for the app.
-5. Install `cloudflared` on the Pi using Cloudflare's current Debian/Raspberry Pi instructions, then authenticate and create a named tunnel:
+2. Create one Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Select **Create a bot for this app**. Set its OAuth redirect URL to `https://kick-webhook.YOUR_DOMAIN/kick/oauth/callback` and its separate webhook URL to `https://kick-webhook.YOUR_DOMAIN/kick/webhook`.
+3. Select only **Read user information**, **Write to Chat feed**, and **Subscribe to events**. Put the application's `KICK_CLIENT_ID`, `KICK_CLIENT_SECRET`, and exact `KICK_OAUTH_REDIRECT_URI` in `.env`. Do not put a broadcaster refresh token or broadcaster ID in `.env`.
+4. Generate one database-encryption key and place the printed value in `KICK_TOKEN_ENCRYPTION_KEY` in `.env`:
+
+   ```bash
+   cd /opt/ninjabridge
+   bot-env/bin/python -m ninjabridge.keygen
+   ```
+
+   Back up this key securely. Changing or losing it makes saved Kick authorizations unreadable.
+5. Install `cloudflared` outside `bot-env` using Cloudflare's current Debian/Raspberry Pi instructions, then authenticate and create a named tunnel:
 
    ```bash
    cloudflared tunnel login
@@ -144,9 +151,9 @@ Kick sends incoming chat as HTTPS webhooks. NinjaBridge listens only on `127.0.0
    sudo systemctl status cloudflared
    ```
 
-8. Start NinjaBridge and run `/direct kick broadcaster_user_id:KICK_NUMERIC_ID`.
+8. Restart NinjaBridge. In each Discord server, an administrator runs `/direct kick` and follows the private authorization link while signed into the Kick account that owns that server's channel. NinjaBridge discovers the broadcaster ID, subscribes to `chat.message.sent`, encrypts the refresh token, and stores that authorization separately for the Discord server.
 
-NinjaBridge downloads Kick's official public key and rejects webhooks whose `Kick-Event-Signature` is invalid. Keep Cloudflare's catch-all `http_status:404` rule so the tunnel does not expose anything else. A named tunnel is required for a stable webhook URL; a quick tunnel changes its address after a restart.
+NinjaBridge uses one shared local listener and routes each signed event by broadcaster ID. It downloads Kick's official public key and rejects invalid signatures. `/direct disable platform:kick` removes only the current Discord server's saved authorization. Keep Cloudflare's catch-all `http_status:404` rule so the tunnel exposes nothing else.
 
 ## Optional Social Stream Ninja
 
@@ -161,8 +168,8 @@ When SSN is connected, NinjaBridge routes through SSN and ignores direct inbound
 - `/setup` saves an SSN session and relay targets.
 - `/forward add`, `/forward remove`, `/forward clear` manage Discord → streaming chat channels.
 - `/receive set`, `/receive clear` manage streaming chats → Discord.
-- `/direct twitch`, `/direct youtube`, `/direct kick` configure direct adapters.
-- `/template` customizes direct relay text with `{name}`, `{message}`, and `{platform}`. An empty value restores `{name} said: {message}`.
+- `/direct twitch` and `/direct youtube` configure installation-level direct adapters. `/direct kick` privately authorizes a separate Kick broadcaster for the current Discord server.
+- `/direct message` customizes direct relay text with `{name}`, `{message}`, and `{platform}`. An empty value restores `{name} said: {message}`.
 - `/direct disable platform` disables one direct adapter.
 - `/switchmessages` controls transport-switch notices.
 - `/status` displays configuration with the SSN session masked.

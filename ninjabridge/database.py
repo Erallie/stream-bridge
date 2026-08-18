@@ -157,6 +157,13 @@ class ConfigStore:
         ).fetchone()
         return json.loads(row[0]) if row else default
 
+    def remove_setting(self, guild_id: str, key: str) -> None:
+        self.connection.execute(
+            "DELETE FROM guild_settings WHERE guild_id=? AND key=?",
+            (guild_id, key),
+        )
+        self.connection.commit()
+
     @staticmethod
     def event_key(platform: str, message_id: str, user_id: str, text: str, timestamp: int | str) -> tuple[str, str]:
         normalized = " ".join(text.casefold().split())
