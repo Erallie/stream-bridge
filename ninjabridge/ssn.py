@@ -8,6 +8,7 @@ import random
 import secrets
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import websockets
 
@@ -29,6 +30,7 @@ class SsnClient:
         password: str = "",
     ) -> None:
         self.url = url
+        self.api_url = os.getenv("SSN_API_WEBSOCKET_URL") or self._default_api_url(url)
         self.session_id = session_id
         self.relay_targets = relay_targets
         self.logger = logger
@@ -39,6 +41,13 @@ class SsnClient:
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)
         self.stopping = False
         self.task: asyncio.Task[None] | None = None
+
+    @staticmethod
+    def _default_api_url(url: str) -> str:
+        parts = urlsplit(url)
+        if parts.path not in ("", "/"):
+            return url
+        return urlunsplit((parts.scheme, parts.netloc, "/api", parts.query, parts.fragment))
 
     async def _set_connected(self, connected: bool) -> None:
         if self.connected == connected:
@@ -111,11 +120,16 @@ class SsnClient:
         while not self.stopping:
             token = f"ninjabridge-{secrets.token_hex(8)}"
             await socket.send(json.dumps({"action": "ninjabridgePresence", "get": token}, separators=(",", ":")))
-            while True:
-                raw = await asyncio.wait_for(socket.recv(), timeout=timeout)
-                if self._is_probe_response(raw, token):
-                    break
-            await self._set_connected(True)
+            try:
+                async with asyncio.timeout(timeout):
+                    while True:
+                        raw = await socket.recv()
+                        if self._is_probe_response(raw, token):
+                            break
+            except TimeoutError:
+                await self._set_connected(False)
+            else:
+                await self._set_connected(True)
             await asyncio.sleep(interval)
 
     async def _run(self) -> None:
@@ -131,7 +145,7 @@ class SsnClient:
                     close_timeout=5,
                 ) as socket:
                     async with websockets.connect(
-                        self.url,
+                        self.api_url,
                         open_timeout=15,
                         ping_interval=25,
                         ping_timeout=15,
@@ -146,7 +160,7 @@ class SsnClient:
                         await probe_socket.send(json.dumps(probe_join))
                         attempt = 0
                         self.logger.info("Connected to SSN relay; waiting for the SSN host")
-                        sender = asyncio.create_task(self._sender(socket), name="ssn-sender")
+                        sender = asyncio.create_task(self._sender(probe_socket), name="ssn-sender")
                         receiver = asyncio.create_task(self._receiver(socket), name="ssn-receiver")
                         probe = asyncio.create_task(self._probe_host(probe_socket), name="ssn-host-probe")
                         done, pending = await asyncio.wait((sender, receiver, probe), return_when=asyncio.FIRST_COMPLETED)

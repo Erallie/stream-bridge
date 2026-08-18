@@ -18,6 +18,10 @@ class SsnClientTests(unittest.TestCase):
         self.assertFalse(client._is_probe_response(json.dumps({"callback": {"get": "other", "result": True}}), "expected"))
         self.assertFalse(client._is_probe_response("not json", "expected"))
 
+    def test_default_api_url_uses_ssn_api_endpoint(self) -> None:
+        self.assertEqual(SsnClient._default_api_url("wss://io.socialstream.ninja"), "wss://io.socialstream.ninja/api")
+        self.assertEqual(SsnClient._default_api_url("wss://example.test/custom"), "wss://example.test/custom")
+
     def test_status_handler_runs_only_when_transport_changes(self) -> None:
         changes: list[bool] = []
 
