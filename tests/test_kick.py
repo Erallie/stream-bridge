@@ -56,11 +56,11 @@ class KickGatewayTests(unittest.TestCase):
                 store = ConfigStore(str(Path(directory) / "bot.sqlite"))
                 gateway = KickGateway(store, ignore_event, ignore_authorized)
                 gateway.listener_ready = True
-                url = gateway.authorization_url(42, 99)
+                url = gateway.authorization_url(42, True)
 
                 self.assertEqual(len(gateway.pending), 1)
                 pending = next(iter(gateway.pending.values()))
-                self.assertEqual((pending.guild_id, pending.discord_user_id), (42, 99))
+                self.assertEqual(pending.guild_id, 42)
                 self.assertIn("code_challenge_method=S256", url)
                 store.close()
 

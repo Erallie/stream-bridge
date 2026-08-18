@@ -117,7 +117,7 @@ Do not leave the public NinjaBridge app in **Testing** or maintain a test-user a
 
 ## Direct Kick without opening router ports
 
-Kick sends incoming chat as HTTPS webhooks. Kick and YouTube return each user's OAuth authorization through HTTPS. By default, NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel carries those routes over an outbound connection. You do not forward a router port. If that local port is already occupied, set `KICK_WEBHOOK_PORT` to a free port in `.env` and use that same port in the Cloudflare tunnel configuration.
+Kick sends incoming chat as HTTPS webhooks. Kick and YouTube return each user's OAuth authorization through HTTPS. By default, NinjaBridge's shared web gateway listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel carries those routes over an outbound connection. You do not forward a router port. If that local port is already occupied, set `WEBHOOK_PORT` to a free port in `.env` and use that same port in the Cloudflare tunnel configuration.
 
 1. Add a domain to Cloudflare.
 2. Create one Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Select **Create a bot for this app**. Set its OAuth redirect URL to `https://ninjabridge-webhook.YOUR_DOMAIN/kick/oauth/callback` and its separate webhook URL to `https://ninjabridge-webhook.YOUR_DOMAIN/kick/webhook`.
@@ -138,7 +138,7 @@ Kick sends incoming chat as HTTPS webhooks. Kick and YouTube return each user's 
    cloudflared tunnel route dns ninjabridge ninjabridge-webhook.YOUR_DOMAIN
    ```
 
-6. Copy `deploy/cloudflared-config.yml.example` to `~/.cloudflared/config.yml`. Replace the tunnel UUID, Linux username, and hostname. The single hostname rule intentionally routes `/kick/webhook`, `/kick/oauth/callback`, and `/youtube/oauth/callback` to NinjaBridge. If `KICK_WEBHOOK_PORT` is `8766`, change `8765` to `8766` in this file too.
+6. Copy `deploy/cloudflared-config.yml.example` to `~/.cloudflared/config.yml`. Replace the tunnel UUID, Linux username, and hostname. The single hostname rule intentionally routes `/kick/webhook`, `/kick/oauth/callback`, and `/youtube/oauth/callback` to NinjaBridge. If `WEBHOOK_PORT` is `8766`, change `8765` to `8766` in this file too.
 7. Validate the configuration, then install the tunnel service:
 
    ```bash

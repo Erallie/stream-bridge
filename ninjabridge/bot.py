@@ -19,6 +19,7 @@ from ninjabridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_tex
 from ninjabridge.relay import ReflectionTracker
 from ninjabridge.ssn import SsnClient
 from ninjabridge.youtube import YouTubeGateway
+from ninjabridge.web import WebGateway
 
 load_dotenv()
 
@@ -44,7 +45,8 @@ class NinjaBridge(commands.Bot):
         super().__init__(command_prefix=commands.when_mentioned, intents=intents, application_id=int(os.environ["DISCORD_CLIENT_ID"]))
         self.store = ConfigStore(os.getenv("DATABASE_PATH", "./data/bot.sqlite"))
         self.youtube = YouTubeGateway(self.store, self.handle_youtube_authorized)
-        self.kick = KickGateway(self.store, self.handle_kick_event, self.handle_kick_authorized, self.youtube)
+        self.kick = KickGateway(self.store, self.handle_kick_event, self.handle_kick_authorized)
+        self.web = WebGateway(self.kick, self.youtube)
         self.ssn_clients: dict[int, SsnClient] = {}
         self.direct_hubs: dict[int, DirectHub] = {}
         self.webhooks: dict[int, discord.Webhook] = {}
@@ -55,6 +57,7 @@ class NinjaBridge(commands.Bot):
     async def setup_hook(self) -> None:
         self.youtube.load_accounts()
         await self.kick.start()
+        await self.web.start()
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
             guild = discord.Object(id=int(guild_id))
@@ -253,6 +256,7 @@ class NinjaBridge(commands.Bot):
             await asyncio.gather(self.history_task, return_exceptions=True)
         await asyncio.gather(*(client.close() for client in self.ssn_clients.values()), return_exceptions=True)
         await asyncio.gather(*(hub.close() for hub in self.direct_hubs.values()), return_exceptions=True)
+        await self.web.close()
         await self.kick.close()
         await self.youtube.close()
         self.store.close()
@@ -343,7 +347,7 @@ async def direct_twitch(i: discord.Interaction, channel: str) -> None:
 async def direct_youtube(i: discord.Interaction) -> None:
     assert i.guild_id
     try:
-        url = bot.youtube.authorization_url(i.guild_id, i.user.id, bot.kick.listener_ready)
+        url = bot.youtube.authorization_url(i.guild_id, bot.web.listener_ready)
     except RuntimeError as error:
         await i.response.send_message(str(error), ephemeral=True)
         return
@@ -354,7 +358,7 @@ async def direct_youtube(i: discord.Interaction) -> None:
 async def direct_kick(i: discord.Interaction) -> None:
     assert i.guild_id
     try:
-        url = bot.kick.authorization_url(i.guild_id, i.user.id)
+        url = bot.kick.authorization_url(i.guild_id, bot.web.listener_ready)
     except RuntimeError as error:
         await i.response.send_message(str(error), ephemeral=True)
         return
@@ -373,8 +377,6 @@ async def direct_disable(i: discord.Interaction, platform: str) -> None:
         await bot.kick.disable(i.guild_id)
     elif platform == "youtube":
         await bot.youtube.disable(i.guild_id)
-        bot.store.remove_setting(str(i.guild_id), "direct_youtube_enabled")
-        bot.store.remove_setting(str(i.guild_id), "direct_youtube_live_chat_id")
     else:
         bot.store.set_setting(str(i.guild_id), "direct_twitch_channel", "")
     await bot.reset_direct(i.guild_id)

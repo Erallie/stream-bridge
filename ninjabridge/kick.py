@@ -47,7 +47,6 @@ def create_pkce_pair() -> tuple[str, str]:
 @dataclass
 class PendingAuthorization:
     guild_id: int
-    discord_user_id: int
     verifier: str
     expires_at: float
 
@@ -90,11 +89,10 @@ class KickAccount:
 class KickGateway:
     """One webhook/OAuth service with separately authorized Kick accounts per Discord guild."""
 
-    def __init__(self, store: ConfigStore, handler: KickHandler, on_authorized: AuthorizedHandler, youtube: Any = None) -> None:
+    def __init__(self, store: ConfigStore, handler: KickHandler, on_authorized: AuthorizedHandler) -> None:
         self.store = store
         self.handler = handler
         self.on_authorized = on_authorized
-        self.youtube = youtube
         self.client_id = os.getenv("KICK_CLIENT_ID", "")
         self.client_secret = os.getenv("KICK_CLIENT_SECRET", "")
         self.redirect_uri = os.getenv("KICK_OAUTH_REDIRECT_URI", "")
@@ -105,9 +103,7 @@ class KickGateway:
         self.pending: dict[str, PendingAuthorization] = {}
         self.public_key: Any = None
         self.session: aiohttp.ClientSession | None = None
-        self.runner: web.AppRunner | None = None
         self.start_task: asyncio.Task[None] | None = None
-        self.listener_ready = False
 
     @staticmethod
     def _load_fernet() -> Fernet | None:
@@ -131,42 +127,25 @@ class KickGateway:
 
     async def start(self) -> None:
         self.load_accounts()
-        self.start_task = asyncio.create_task(self.run_listener(), name="kick-gateway")
+        if self.client_id:
+            self.start_task = asyncio.create_task(self.load_public_key(), name="kick-public-key")
 
-    async def run_listener(self) -> None:
+    async def load_public_key(self) -> None:
         while True:
             try:
-                if self.client_id:
-                    session = await self.get_session()
-                    async with session.get("https://api.kick.com/public/v1/public-key") as response:
-                        body = await response.json(content_type=None)
-                        pem = body.get("data", {}).get("public_key") or body.get("public_key") or body.get("data")
-                        if response.status >= 400 or not isinstance(pem, str):
-                            raise RuntimeError(f"Could not load Kick public key (HTTP {response.status})")
-                    self.public_key = serialization.load_pem_public_key(pem.encode())
-                app = web.Application(client_max_size=1024 * 1024)
-                app.router.add_post(os.getenv("KICK_WEBHOOK_PATH", "/kick/webhook"), self.webhook)
-                app.router.add_get(os.getenv("KICK_OAUTH_CALLBACK_PATH", "/kick/oauth/callback"), self.oauth_callback)
-                if self.youtube:
-                    app.router.add_get(os.getenv("YOUTUBE_OAUTH_CALLBACK_PATH", "/youtube/oauth/callback"), self.youtube.oauth_callback)
-                self.runner = web.AppRunner(app, access_log=logging.getLogger("ninjabridge.kick.http"))
-                await self.runner.setup()
-                await web.TCPSite(
-                    self.runner,
-                    os.getenv("KICK_WEBHOOK_HOST", "127.0.0.1"),
-                    int(os.getenv("KICK_WEBHOOK_PORT", "8765")),
-                ).start()
-                self.listener_ready = True
-                logging.info("Kick webhook and OAuth receiver listening on the loopback interface")
+                session = await self.get_session()
+                async with session.get("https://api.kick.com/public/v1/public-key") as response:
+                    body = await response.json(content_type=None)
+                    pem = body.get("data", {}).get("public_key") or body.get("public_key") or body.get("data")
+                    if response.status >= 400 or not isinstance(pem, str):
+                        raise RuntimeError(f"Could not load Kick public key (HTTP {response.status})")
+                self.public_key = serialization.load_pem_public_key(pem.encode())
+                logging.info("Loaded Kick webhook verification key")
                 return
             except asyncio.CancelledError:
                 return
             except Exception:
-                logging.exception("Kick gateway could not start; retrying in 30 seconds")
-                if self.runner:
-                    await self.runner.cleanup()
-                    self.runner = None
-                self.listener_ready = False
+                logging.exception("Kick public key could not be loaded; retrying in 30 seconds")
                 await asyncio.sleep(30)
 
     def load_accounts(self) -> None:
@@ -199,15 +178,15 @@ class KickGateway:
             "refresh_token": encrypted,
         })
 
-    def authorization_url(self, guild_id: int, discord_user_id: int) -> str:
+    def authorization_url(self, guild_id: int, listener_ready: bool) -> str:
         if not self.authorization_configured:
             raise RuntimeError("Kick authorization has not been configured by the NinjaBridge owner.")
-        if not self.listener_ready:
-            raise RuntimeError("The Kick gateway is still connecting. Try this command again in a moment.")
+        if not listener_ready:
+            raise RuntimeError("The authorization receiver is still starting. Try again in a moment.")
         self._prune_pending()
         state = secrets.token_urlsafe(32)
         verifier, challenge = create_pkce_pair()
-        self.pending[state] = PendingAuthorization(guild_id, discord_user_id, verifier, time.monotonic() + 600)
+        self.pending[state] = PendingAuthorization(guild_id, verifier, time.monotonic() + 600)
         query = urllib.parse.urlencode({
             "client_id": self.client_id,
             "redirect_uri": self.redirect_uri,
@@ -289,6 +268,8 @@ class KickGateway:
                 raise RuntimeError(f"Kick chat subscription failed: HTTP {response.status}: {detail[:200]}")
 
     async def webhook(self, request: web.Request) -> web.Response:
+        if not self.public_key:
+            return web.Response(status=503, text="Kick webhook verification is not ready")
         raw = await request.read()
         message_id = request.headers.get("Kick-Event-Message-Id", "")
         timestamp = request.headers.get("Kick-Event-Message-Timestamp", "")
@@ -338,11 +319,8 @@ class KickGateway:
         self.store.remove_setting(str(guild_id), "kick_authorization")
 
     async def close(self) -> None:
-        self.listener_ready = False
         if self.start_task:
             self.start_task.cancel()
             await asyncio.gather(self.start_task, return_exceptions=True)
-        if self.runner:
-            await self.runner.cleanup()
         if self.session and not self.session.closed:
             await self.session.close()

@@ -49,9 +49,9 @@ class YouTubeGatewayTests(unittest.TestCase):
             with patch.dict(os.environ, environment, clear=True):
                 store = ConfigStore(str(Path(directory) / "bot.sqlite"))
                 gateway = YouTubeGateway(store, ignore_authorized)
-                url = gateway.authorization_url(42, 99, True)
+                url = gateway.authorization_url(42, True)
                 pending = next(iter(gateway.pending.values()))
-                self.assertEqual((pending.guild_id, pending.discord_user_id), (42, 99))
+                self.assertEqual(pending.guild_id, 42)
                 self.assertIn("access_type=offline", url)
                 store.close()
 

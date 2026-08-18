@@ -27,6 +27,7 @@ class TwitchAdapter:
         self.client_id = os.getenv("TWITCH_CLIENT_ID", "")
         self.session: aiohttp.ClientSession | None = None
         self.avatar_cache: dict[str, tuple[float, str]] = {}
+        self.next_avatar_prune = 0.0
 
     def start(self) -> None:
         self.task = asyncio.create_task(self.run(), name=f"twitch-{self.channel}")
@@ -100,6 +101,12 @@ class TwitchAdapter:
         await self.handler({"type": "twitch", "id": tags.get("id", ""), "userid": user_id or login, "chatname": tags.get("display-name", login), "username": login, "chatmessage": message, "chatimg": avatar_url, "nameColor": tags.get("color", ""), "source": "direct"})
 
     async def get_avatar(self, user_id: str, login: str) -> str:
+        now = time.monotonic()
+        if now >= self.next_avatar_prune:
+            self.avatar_cache = {key: value for key, value in self.avatar_cache.items() if value[0] > now}
+            while len(self.avatar_cache) > 10000:
+                self.avatar_cache.pop(next(iter(self.avatar_cache)))
+            self.next_avatar_prune = now + 300
         cache_key = user_id or login.casefold()
         cached = self.avatar_cache.get(cache_key)
         if cached and cached[0] > time.monotonic():
@@ -150,6 +157,11 @@ class YouTubeAdapter:
         self.oauth = oauth
         self.session: aiohttp.ClientSession | None = None
         self.waiting_for_broadcast = False
+        try:
+            self.discovery_interval = max(60, float(os.getenv("YOUTUBE_DISCOVERY_INTERVAL", "300")))
+        except ValueError:
+            self.discovery_interval = 300
+            logging.warning("Invalid YOUTUBE_DISCOVERY_INTERVAL; using 300 seconds")
 
     def start(self) -> None:
         self.task = asyncio.create_task(self.run(), name="youtube-live-chat")
@@ -203,7 +215,7 @@ class YouTubeAdapter:
         while True:
             try:
                 if not self.live_chat_id and not await self.discover_live_chat():
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(self.discovery_interval)
                     continue
                 params = {"liveChatId": self.live_chat_id, "part": "id,snippet,authorDetails", "maxResults": 200}
                 if self.page_token:

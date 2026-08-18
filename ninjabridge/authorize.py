@@ -23,12 +23,6 @@ PROVIDERS = {
         "scope": "chat:read chat:edit",
         "prefix": "TWITCH",
     },
-    "youtube": {
-        "authorize": "https://accounts.google.com/o/oauth2/v2/auth",
-        "token": "https://oauth2.googleapis.com/token",
-        "scope": "https://www.googleapis.com/auth/youtube.force-ssl",
-        "prefix": "YOUTUBE",
-    },
 }
 
 
@@ -97,8 +91,6 @@ def main() -> None:
         "scope": provider["scope"],
         "state": state,
     }
-    if args.provider == "youtube":
-        params.update({"access_type": "offline", "prompt": "consent"})
     url = provider["authorize"] + "?" + urllib.parse.urlencode(params)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Callback)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -114,7 +106,7 @@ def main() -> None:
         raise SystemExit("No authorization response arrived within five minutes.")
     body = exchange(provider["token"], {"client_id": client_id, "client_secret": client_secret, "code": result["code"], "grant_type": "authorization_code", "redirect_uri": redirect_uri})
     if not body.get("refresh_token"):
-        raise SystemExit(f"{args.provider.title()} did not return a refresh token. Revoke access and authorize again.")
+        raise SystemExit("Twitch did not return a refresh token. Revoke access and authorize again.")
     path = save_tokens(prefix, client_id, client_secret, body)
     print(f"Saved credentials to {path}. Copy those three lines into .env, then securely delete that temporary file.")
 

@@ -22,7 +22,6 @@ AuthorizedHandler = Callable[[int, str], Awaitable[None]]
 @dataclass
 class PendingAuthorization:
     guild_id: int
-    discord_user_id: int
     expires_at: float
 
 
@@ -89,7 +88,7 @@ class YouTubeGateway:
             "refresh_token": self.fernet.encrypt(refresh_token.encode()).decode("ascii"),
         })
 
-    def authorization_url(self, guild_id: int, discord_user_id: int, listener_ready: bool) -> str:
+    def authorization_url(self, guild_id: int, listener_ready: bool) -> str:
         if not (self.client_id and self.client_secret and self.redirect_uri and self.fernet):
             raise RuntimeError("YouTube authorization has not been configured by the NinjaBridge owner.")
         if not listener_ready:
@@ -97,7 +96,7 @@ class YouTubeGateway:
         now = time.monotonic()
         self.pending = {key: value for key, value in self.pending.items() if value.expires_at >= now}
         state = secrets.token_urlsafe(32)
-        self.pending[state] = PendingAuthorization(guild_id, discord_user_id, now + 600)
+        self.pending[state] = PendingAuthorization(guild_id, now + 600)
         query = urllib.parse.urlencode({
             "client_id": self.client_id,
             "redirect_uri": self.redirect_uri,
