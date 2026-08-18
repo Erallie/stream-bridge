@@ -36,10 +36,11 @@ def webhook_username(display_name: str, platform: str) -> str:
     return combined[:80]
 
 
-def format_status(channels: str, session: str, ssn_state: str, direct: str, template: str, mirror: str) -> str:
+def format_status(channels: str, session: str, ssn_state: str, ssn_targets: str, direct: str, template: str, mirror: str) -> str:
     return (
         f"**Discord channels forwarded:** {channels}\n"
         f"**SSN session:** {session} ({ssn_state})\n"
+        f"**Platforms relayed through SSN:** {ssn_targets}\n"
         f"**Direct platforms:** {direct}\n"
         f"**Direct relay message:** `{template}`\n"
         f"**Platform messages received in Discord:** {mirror}"
@@ -439,6 +440,7 @@ async def status(i: discord.Interaction) -> None:
     channels = ", ".join(f"<#{x}>" for x in c.channel_ids) if c else "none"
     mirror = f"<#{c.discord_relay_channel_id}>" if c and c.discord_relay_channel_id else "off"
     ssn_state = "connected" if i.guild_id in bot.ssn_clients and bot.ssn_clients[i.guild_id].connected else "disconnected"
+    ssn_targets = ", ".join(c.relay_targets) if c and c.relay_targets else "none"
     direct_platforms = []
     for platform in bot.direct_platforms(i.guild_id):
         if platform == "twitch":
@@ -450,7 +452,7 @@ async def status(i: discord.Interaction) -> None:
             direct_platforms.append(f"kick ({bot.kick.username(i.guild_id)})")
     direct = ", ".join(direct_platforms) or "none"
     template = str(bot.store.get_setting(str(i.guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
-    await i.response.send_message(format_status(channels, session, ssn_state, direct, template, mirror), ephemeral=True)
+    await i.response.send_message(format_status(channels, session, ssn_state, ssn_targets, direct, template, mirror), ephemeral=True)
 def main() -> None:
     missing = [x for x in ("DISCORD_TOKEN", "DISCORD_CLIENT_ID") if not os.getenv(x)]
     if missing:

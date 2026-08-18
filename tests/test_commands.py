@@ -10,10 +10,11 @@ from ninjabridge.relay import ReflectionTracker
 
 class CommandMetadataTests(unittest.TestCase):
     def test_status_labels_remain_bold(self) -> None:
-        message = format_status("#chat", "abc••••••", "connected", "twitch (channel)", "{message}", "#relay")
+        message = format_status("#chat", "abc••••••", "connected", "twitch, youtube", "twitch (channel)", "{message}", "#relay")
 
         self.assertIn("**Discord channels forwarded:**", message)
         self.assertIn("**SSN session:**", message)
+        self.assertIn("**Platforms relayed through SSN:** twitch, youtube", message)
         self.assertIn("**Direct platforms:**", message)
         self.assertIn("**Direct relay message:**", message)
         self.assertIn("**Platform messages received in Discord:**", message)
