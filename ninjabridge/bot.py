@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -15,6 +16,7 @@ from ninjabridge.database import ConfigStore, GuildConfig
 from ninjabridge.direct import DirectHub
 from ninjabridge.kick import KickGateway
 from ninjabridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, to_relay_text, to_ssn_message, validate_direct_relay_template
+from ninjabridge.relay import ReflectionTracker
 from ninjabridge.ssn import SsnClient
 
 load_dotenv()
@@ -22,6 +24,14 @@ load_dotenv()
 
 def parse_list(value: str | None) -> list[str]:
     return list(dict.fromkeys(x.strip().lower() for x in (value or "").split(",") if x.strip()))
+
+
+def webhook_username(display_name: str, platform: str) -> str:
+    name = display_name.strip() or "Unknown user"
+    combined = f"{name} ({platform.title()})"
+    combined = re.sub("discord", "Dis-cord", combined, flags=re.IGNORECASE)
+    combined = re.sub("clyde", "C-lyde", combined, flags=re.IGNORECASE)
+    return combined[:80]
 
 
 class NinjaBridge(commands.Bot):
@@ -36,6 +46,7 @@ class NinjaBridge(commands.Bot):
         self.ssn_clients: dict[int, SsnClient] = {}
         self.direct_hubs: dict[int, DirectHub] = {}
         self.webhooks: dict[int, discord.Webhook] = {}
+        self.ssn_reflections: dict[int, ReflectionTracker] = {}
         self.history_task: asyncio.Task[None] | None = None
         self.ssn_url = os.getenv("SSN_WEBSOCKET_URL", "wss://io.socialstream.ninja")
 
@@ -154,6 +165,10 @@ class NinjaBridge(commands.Bot):
         if data.get("reflection") or data.get("bot") or not data.get("chatname") or not (message_text or content_image):
             return False
         platform = str(data.get("type", "unknown")).lower()
+        tracker = self.ssn_reflections.get(guild_id)
+        if tracker and message_text and tracker.consume(platform, message_text):
+            logging.info("Suppressed a returning SSN relay echo from %s", platform)
+            return False
         user_id = str(data.get("userid") or data.get("chatname", ""))
         key = self.store.claim_event(str(guild_id), platform, str(data.get("id", "")), user_id, message_text or content_image, data.get("timestamp", int(time.time())))
         if not key:
@@ -182,7 +197,7 @@ class NinjaBridge(commands.Bot):
                 hook = await channel.create_webhook(name="NinjaBridge", reason="Cross-platform relay")
             self.webhooks[channel_id] = hook
         try:
-            await hook.send(content, username=f"{display_name} ({platform.title()})"[:80], avatar_url=avatar_url or None, allowed_mentions=discord.AllowedMentions.none(), wait=True)
+            await hook.send(content, username=webhook_username(display_name, platform), avatar_url=avatar_url or None, allowed_mentions=discord.AllowedMentions.none(), wait=True)
         except discord.NotFound:
             self.webhooks.pop(channel_id, None)
             raise
@@ -197,7 +212,7 @@ class NinjaBridge(commands.Bot):
         payload = to_ssn_message(message)
         if not (payload["chatmessage"] or payload["contentimg"]):
             return
-        key = self.store.claim_event(guild_id, "discord", str(message.id), str(message.author.id), payload["chatmessage"], int(message.created_at.timestamp()))
+        key = self.store.claim_event(guild_id, "discord", str(payload["id"]), str(message.author.id), payload["chatmessage"], int(message.created_at.timestamp()))
         if not key:
             return
         ssn = self.get_ssn(message.guild.id, config) if config.session_id else None
@@ -205,7 +220,9 @@ class NinjaBridge(commands.Bot):
             await ssn.inject(payload)
             for target in config.relay_targets:
                 if self.store.claim_delivery(guild_id, key, target):
-                    await ssn.send_chat(target, to_relay_text(payload))
+                    relay_text = to_relay_text(payload)
+                    self.ssn_reflections.setdefault(message.guild.id, ReflectionTracker()).add(target, relay_text)
+                    await ssn.send_chat(target, relay_text)
         else:
             template = str(self.store.get_setting(guild_id, "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
             await self.send_direct(message.guild.id, to_relay_text(payload, template))
