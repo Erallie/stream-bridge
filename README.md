@@ -35,6 +35,8 @@ nano .env
 
 Never commit `.env`, `data/`, OAuth tokens, Discord tokens, tunnel credentials, or logs. They are excluded by `.gitignore`.
 
+NinjaBridge automatically saves rotated platform refresh tokens in `data/oauth_tokens.json`, so a provider-issued replacement survives a restart. Keep the original refresh token in `.env`; if you deliberately replace it there, the new value takes precedence. Processed-event and delivery history is retained for 30 days by default and cleaned at startup and every 24 hours while the bot remains online. Advanced installations can change `HISTORY_RETENTION_DAYS`.
+
 For a first foreground run:
 
 ```bash

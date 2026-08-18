@@ -30,6 +30,20 @@ class ConfigStoreTests(unittest.TestCase):
             self.assertFalse(store.claim_delivery("guild-1", event, "discord"))
             store.close()
 
+    def test_prunes_old_event_and_delivery_history(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ninja-bridge-") as directory:
+            store = ConfigStore(str(Path(directory) / "bot.sqlite"))
+            event = store.claim_event("guild-1", "twitch", "old-message", "user", "Hello", 1)
+            self.assertIsNotNone(event)
+            self.assertTrue(store.claim_delivery("guild-1", event, "discord"))
+            store.connection.execute("UPDATE processed_events SET created_at = '2000-01-01T00:00:00+00:00'")
+            store.connection.execute("UPDATE deliveries SET created_at = '2000-01-01T00:00:00+00:00'")
+            store.connection.commit()
+
+            self.assertEqual(store.prune_history(30), (1, 1))
+            self.assertIsNotNone(store.claim_event("guild-1", "twitch", "old-message", "user", "Hello", 1))
+            store.close()
+
 
 if __name__ == "__main__":
     unittest.main()

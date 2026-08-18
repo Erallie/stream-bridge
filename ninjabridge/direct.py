@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 from ninjabridge.oauth import OAuthToken
+from ninjabridge.relay import ReflectionTracker
 
 Handler = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -32,6 +33,10 @@ class TwitchAdapter:
         self.task = asyncio.create_task(self.run(), name=f"twitch-{self.channel}")
 
     async def send(self, text: str) -> None:
+        if self.queue.full():
+            self.queue.get_nowait()
+            self.queue.task_done()
+            logging.warning("Twitch send queue full; discarded oldest message")
         await self.queue.put(text[:500])
 
     async def run(self) -> None:
@@ -70,10 +75,15 @@ class TwitchAdapter:
                 await asyncio.sleep(delay)
 
     async def sender(self, socket: Any) -> None:
+        last_send = 0.0
         while True:
             text = await self.queue.get()
             try:
+                delay = 1.5 - (asyncio.get_running_loop().time() - last_send)
+                if delay > 0:
+                    await asyncio.sleep(delay)
                 await socket.send(f"PRIVMSG #{self.channel} :{text}")
+                last_send = asyncio.get_running_loop().time()
             finally:
                 self.queue.task_done()
 
@@ -98,9 +108,15 @@ class YouTubeAdapter:
         self.task: asyncio.Task[None] | None = None
         self.page_token = ""
         self.oauth = OAuthToken("YOUTUBE", "https://oauth2.googleapis.com/token")
+        self.session: aiohttp.ClientSession | None = None
 
     def start(self) -> None:
         self.task = asyncio.create_task(self.run(), name="youtube-live-chat")
+
+    async def get_session(self) -> aiohttp.ClientSession:
+        if not self.session or self.session.closed:
+            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
+        return self.session
 
     async def request(self, session: aiohttp.ClientSession, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
         for attempt in range(2):
@@ -116,40 +132,42 @@ class YouTubeAdapter:
         if not self.oauth.configured:
             logging.error("Direct YouTube requires YouTube OAuth credentials")
             return
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            while True:
-                try:
-                    params = {"liveChatId": self.live_chat_id, "part": "id,snippet,authorDetails", "maxResults": 200}
-                    if self.page_token:
-                        params["pageToken"] = self.page_token
-                    status, body = await self.request(session, "GET", "https://www.googleapis.com/youtube/v3/liveChat/messages", params=params)
-                    if status >= 400:
-                        raise RuntimeError(f"YouTube HTTP {status}: {body}")
-                    initial = not self.page_token
-                    self.page_token = body.get("nextPageToken", self.page_token)
-                    if not initial:
-                        for item in body.get("items", []):
-                            snippet, author = item.get("snippet", {}), item.get("authorDetails", {})
-                            if snippet.get("type") == "textMessageEvent":
-                                await self.handler({"type": "youtube", "id": item.get("id", ""), "userid": author.get("channelId", ""), "chatname": author.get("displayName", ""), "username": author.get("displayName", ""), "chatmessage": snippet.get("displayMessage", ""), "chatimg": author.get("profileImageUrl", ""), "source": "direct"})
-                    await asyncio.sleep(max(1, int(body.get("pollingIntervalMillis", 5000)) / 1000))
-                except asyncio.CancelledError:
-                    return
-                except Exception:
-                    logging.exception("Direct YouTube polling failed; retrying")
-                    await asyncio.sleep(15)
+        session = await self.get_session()
+        while True:
+            try:
+                params = {"liveChatId": self.live_chat_id, "part": "id,snippet,authorDetails", "maxResults": 200}
+                if self.page_token:
+                    params["pageToken"] = self.page_token
+                status, body = await self.request(session, "GET", "https://www.googleapis.com/youtube/v3/liveChat/messages", params=params)
+                if status >= 400:
+                    raise RuntimeError(f"YouTube HTTP {status}: {body}")
+                initial = not self.page_token
+                self.page_token = body.get("nextPageToken", self.page_token)
+                if not initial:
+                    for item in body.get("items", []):
+                        snippet, author = item.get("snippet", {}), item.get("authorDetails", {})
+                        if snippet.get("type") == "textMessageEvent":
+                            await self.handler({"type": "youtube", "id": item.get("id", ""), "userid": author.get("channelId", ""), "chatname": author.get("displayName", ""), "username": author.get("displayName", ""), "chatmessage": snippet.get("displayMessage", ""), "chatimg": author.get("profileImageUrl", ""), "source": "direct"})
+                await asyncio.sleep(max(1, int(body.get("pollingIntervalMillis", 5000)) / 1000))
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logging.exception("Direct YouTube polling failed; retrying")
+                await asyncio.sleep(15)
 
     async def send(self, text: str) -> None:
         payload = {"snippet": {"liveChatId": self.live_chat_id, "type": "textMessageEvent", "textMessageDetails": {"messageText": text[:200]}}}
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            status, body = await self.request(session, "POST", "https://www.googleapis.com/youtube/v3/liveChat/messages", params={"part": "snippet"}, json=payload)
-            if status >= 400:
-                raise RuntimeError(f"YouTube send failed: HTTP {status}: {body}")
+        session = await self.get_session()
+        status, body = await self.request(session, "POST", "https://www.googleapis.com/youtube/v3/liveChat/messages", params={"part": "snippet"}, json=payload)
+        if status >= 400:
+            raise RuntimeError(f"YouTube send failed: HTTP {status}: {body}")
 
     async def close(self) -> None:
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
+        if self.session and not self.session.closed:
+            await self.session.close()
 
 
 class KickAdapter:
@@ -159,21 +177,28 @@ class KickAdapter:
         self.oauth = OAuthToken("KICK", "https://id.kick.com/oauth/token")
         self.runner: web.AppRunner | None = None
         self.public_key: Any = None
+        self.task: asyncio.Task[None] | None = None
+        self.session: aiohttp.ClientSession | None = None
 
     def start(self) -> None:
-        asyncio.create_task(self.run(), name="kick-webhook")
+        self.task = asyncio.create_task(self.run(), name="kick-webhook")
+
+    async def get_session(self) -> aiohttp.ClientSession:
+        if not self.session or self.session.closed:
+            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
+        return self.session
 
     async def run(self) -> None:
         if not self.oauth.configured:
             logging.error("Direct Kick requires Kick OAuth credentials")
             return
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                async with session.get("https://api.kick.com/public/v1/public-key") as response:
-                    body = await response.json(content_type=None)
-                    pem = body.get("data", {}).get("public_key") or body.get("public_key") or body.get("data")
-                    if response.status >= 400 or not isinstance(pem, str):
-                        raise RuntimeError(f"Could not load Kick public key (HTTP {response.status})")
+            session = await self.get_session()
+            async with session.get("https://api.kick.com/public/v1/public-key") as response:
+                body = await response.json(content_type=None)
+                pem = body.get("data", {}).get("public_key") or body.get("public_key") or body.get("data")
+                if response.status >= 400 or not isinstance(pem, str):
+                    raise RuntimeError(f"Could not load Kick public key (HTTP {response.status})")
             self.public_key = serialization.load_pem_public_key(pem.encode())
             app = web.Application(client_max_size=1024 * 1024)
             app.router.add_post(os.getenv("KICK_WEBHOOK_PATH", "/kick/webhook"), self.webhook)
@@ -206,39 +231,58 @@ class KickAdapter:
         payload: dict[str, Any] = {"content": text[:500], "type": "user"}
         if self.broadcaster_user_id:
             payload["broadcaster_user_id"] = int(self.broadcaster_user_id)
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            for attempt in range(2):
-                token = await self.oauth.get(force_refresh=attempt == 1)
-                async with session.post("https://api.kick.com/public/v1/chat", headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json=payload) as response:
-                    if response.status != 401 or attempt:
-                        if response.status >= 400:
-                            raise RuntimeError(f"Kick send failed: HTTP {response.status}")
-                        return
+        session = await self.get_session()
+        for attempt in range(2):
+            token = await self.oauth.get(force_refresh=attempt == 1)
+            async with session.post("https://api.kick.com/public/v1/chat", headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json=payload) as response:
+                if response.status != 401 or attempt:
+                    if response.status >= 400:
+                        raise RuntimeError(f"Kick send failed: HTTP {response.status}")
+                    return
 
     async def close(self) -> None:
+        if self.task:
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
         if self.runner:
             await self.runner.cleanup()
+        if self.session and not self.session.closed:
+            await self.session.close()
 
 
 class DirectHub:
     def __init__(self, handler: Handler, twitch_channel: str = "", youtube_live_chat_id: str = "", kick_broadcaster_user_id: str = "") -> None:
         self.adapters: dict[str, Any] = {}
+        self.reflections = ReflectionTracker()
+
+        def platform_handler(platform: str) -> Handler:
+            async def received(data: dict[str, Any]) -> None:
+                if self.reflections.consume(platform, str(data.get("chatmessage", ""))):
+                    logging.debug("Suppressed reflected %s relay message", platform)
+                    return
+                await handler(data)
+            return received
+
         if twitch_channel:
-            self.adapters["twitch"] = TwitchAdapter(twitch_channel, handler)
+            self.adapters["twitch"] = TwitchAdapter(twitch_channel, platform_handler("twitch"))
         if youtube_live_chat_id:
-            self.adapters["youtube"] = YouTubeAdapter(youtube_live_chat_id, handler)
+            self.adapters["youtube"] = YouTubeAdapter(youtube_live_chat_id, platform_handler("youtube"))
         if kick_broadcaster_user_id:
-            self.adapters["kick"] = KickAdapter(kick_broadcaster_user_id, handler)
+            self.adapters["kick"] = KickAdapter(kick_broadcaster_user_id, platform_handler("kick"))
 
     def start(self) -> None:
         for adapter in self.adapters.values():
             adapter.start()
 
     async def send(self, text: str, exclude: str = "") -> None:
-        results = await asyncio.gather(*(adapter.send(text) for platform, adapter in self.adapters.items() if platform != exclude), return_exceptions=True)
-        for result in results:
+        destinations = [(platform, adapter) for platform, adapter in self.adapters.items() if platform != exclude]
+        for platform, _ in destinations:
+            self.reflections.add(platform, text)
+        results = await asyncio.gather(*(adapter.send(text) for _, adapter in destinations), return_exceptions=True)
+        for (platform, _), result in zip(destinations, results, strict=True):
             if isinstance(result, Exception):
-                logging.error("Direct platform send failed: %s", result)
+                self.reflections.discard(platform, text)
+                logging.error("Direct %s send failed: %s", platform, result)
 
     async def close(self) -> None:
         await asyncio.gather(*(adapter.close() for adapter in self.adapters.values()), return_exceptions=True)

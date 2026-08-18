@@ -1,11 +1,46 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import threading
 import time
+from pathlib import Path
 
 import aiohttp
+
+_state_lock = threading.Lock()
+
+
+def _oauth_state_path() -> Path:
+    return Path(os.getenv("OAUTH_STATE_PATH", "./data/oauth_tokens.json"))
+
+
+def _read_state() -> dict[str, dict[str, str]]:
+    path = _oauth_state_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        return {key: value for key, value in data.items() if isinstance(key, str) and isinstance(value, dict)}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _persist_rotated_token(prefix: str, previous: str, current: str) -> None:
+    path = _oauth_state_path()
+    with _state_lock:
+        state = _read_state()
+        state[prefix] = {"refresh_token": current, "supersedes": previous}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            pass
+        temporary.replace(path)
 
 
 class OAuthToken:
@@ -15,7 +50,12 @@ class OAuthToken:
         self.prefix = prefix
         self.token_url = token_url
         self.access_token = os.getenv(f"{prefix}_ACCESS_TOKEN", "").removeprefix("oauth:")
-        self.refresh_token = os.getenv(f"{prefix}_REFRESH_TOKEN", "")
+        configured_refresh = os.getenv(f"{prefix}_REFRESH_TOKEN", "")
+        saved = _read_state().get(prefix, {})
+        if configured_refresh and configured_refresh in {saved.get("supersedes"), saved.get("refresh_token")}:
+            self.refresh_token = saved.get("refresh_token", configured_refresh)
+        else:
+            self.refresh_token = configured_refresh
         self.client_id = os.getenv(f"{prefix}_CLIENT_ID", "")
         self.client_secret = os.getenv(f"{prefix}_CLIENT_SECRET", "")
         self.expires_at = 0.0
@@ -43,8 +83,11 @@ class OAuthToken:
                         raise RuntimeError(f"{self.prefix} token refresh failed (HTTP {response.status})")
             self.access_token = str(body["access_token"])
             if body.get("refresh_token"):
+                previous = self.refresh_token
                 self.refresh_token = str(body["refresh_token"])
-                logging.warning("%s rotated its refresh token; update %s_REFRESH_TOKEN in .env before restarting", self.prefix, self.prefix)
+                if self.refresh_token != previous:
+                    _persist_rotated_token(self.prefix, previous, self.refresh_token)
+                    logging.info("Persisted rotated %s refresh token", self.prefix)
             self.expires_at = time.time() + int(body.get("expires_in", 3600))
             logging.info("Refreshed %s access token", self.prefix)
             return self.access_token

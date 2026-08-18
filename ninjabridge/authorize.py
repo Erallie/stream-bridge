@@ -47,6 +47,10 @@ def save_tokens(prefix: str, client_id: str, client_secret: str, body: dict[str,
         f"{prefix}_REFRESH_TOKEN={body.get('refresh_token', '')}",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
     return path
 
 
@@ -103,6 +107,7 @@ def main() -> None:
     webbrowser.open(url)
     ready.wait(300)
     server.shutdown()
+    server.server_close()
     if result.get("error"):
         raise SystemExit(f"Authorization failed: {result['error']}")
     if not result.get("code"):

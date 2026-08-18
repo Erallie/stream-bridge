@@ -33,6 +33,8 @@ class NinjaBridge(commands.Bot):
         self.store = ConfigStore(os.getenv("DATABASE_PATH", "./data/bot.sqlite"))
         self.ssn_clients: dict[int, SsnClient] = {}
         self.direct_hubs: dict[int, DirectHub] = {}
+        self.webhooks: dict[int, discord.Webhook] = {}
+        self.history_task: asyncio.Task[None] | None = None
         self.ssn_url = os.getenv("SSN_WEBSOCKET_URL", "wss://io.socialstream.ninja")
 
     async def setup_hook(self) -> None:
@@ -46,11 +48,27 @@ class NinjaBridge(commands.Bot):
 
     async def on_ready(self) -> None:
         logging.info("NinjaBridge ready as %s", self.user)
+        if not self.history_task or self.history_task.done():
+            self.history_task = asyncio.create_task(self.maintain_history(), name="history-maintenance")
         for guild_id in self.store.guild_ids():
             config = self.store.get(guild_id)
             if config and config.session_id:
                 self.get_ssn(int(guild_id), config)
             self.get_direct(int(guild_id))
+
+    async def maintain_history(self) -> None:
+        try:
+            retention = max(1, int(os.getenv("HISTORY_RETENTION_DAYS", "30")))
+        except ValueError:
+            retention = 30
+            logging.warning("Invalid HISTORY_RETENTION_DAYS; using 30 days")
+        while True:
+            try:
+                events, deliveries = self.store.prune_history(retention)
+                logging.info("Pruned %d old events and %d old delivery records", events, deliveries)
+            except Exception:
+                logging.exception("History maintenance failed; it will retry tomorrow")
+            await asyncio.sleep(24 * 60 * 60)
 
     async def reset_ssn(self, guild_id: int) -> None:
         client = self.ssn_clients.pop(guild_id, None)
@@ -112,16 +130,18 @@ class NinjaBridge(commands.Bot):
                     logging.exception("Could not announce transport switch in %s", channel_id)
 
     async def handle_ssn(self, guild_id: int, data: dict[str, Any]) -> bool:
-        if data.get("reflection") or data.get("bot") or not data.get("chatname") or not data.get("chatmessage"):
+        message_text = str(data.get("chatmessage") or "")
+        content_image = str(data.get("contentimg") or "")
+        if data.get("reflection") or data.get("bot") or not data.get("chatname") or not (message_text or content_image):
             return False
         platform = str(data.get("type", "unknown")).lower()
         user_id = str(data.get("userid") or data.get("chatname", ""))
-        key = self.store.claim_event(str(guild_id), platform, str(data.get("id", "")), user_id, str(data["chatmessage"]), data.get("timestamp", int(time.time())))
+        key = self.store.claim_event(str(guild_id), platform, str(data.get("id", "")), user_id, message_text or content_image, data.get("timestamp", int(time.time())))
         if not key:
             return False
         config = self.store.get(str(guild_id))
         if config and config.discord_relay_channel_id and self.store.claim_delivery(str(guild_id), key, "discord"):
-            await self.send_webhook(guild_id, int(config.discord_relay_channel_id), str(data["chatname"]), str(data.get("chatimg", "")), platform, str(data["chatmessage"]))
+            await self.send_webhook(guild_id, int(config.discord_relay_channel_id), str(data["chatname"]), str(data.get("chatimg", "")), platform, message_text or content_image)
         return True
 
     async def handle_direct(self, guild_id: int, data: dict[str, Any]) -> None:
@@ -135,11 +155,18 @@ class NinjaBridge(commands.Bot):
         channel = guild.get_channel(channel_id) if guild else None
         if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
             return
-        hooks = await channel.webhooks()
-        hook = next((h for h in hooks if h.name == "NinjaBridge"), None)
+        hook = self.webhooks.get(channel_id)
         if not hook:
-            hook = await channel.create_webhook(name="NinjaBridge", reason="Cross-platform relay")
-        await hook.send(content, username=f"{display_name} ({platform.title()})"[:80], avatar_url=avatar_url or None, allowed_mentions=discord.AllowedMentions.none(), wait=True)
+            hooks = await channel.webhooks()
+            hook = next((item for item in hooks if item.name == "NinjaBridge"), None)
+            if not hook:
+                hook = await channel.create_webhook(name="NinjaBridge", reason="Cross-platform relay")
+            self.webhooks[channel_id] = hook
+        try:
+            await hook.send(content, username=f"{display_name} ({platform.title()})"[:80], avatar_url=avatar_url or None, allowed_mentions=discord.AllowedMentions.none(), wait=True)
+        except discord.NotFound:
+            self.webhooks.pop(channel_id, None)
+            raise
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.webhook_id or not message.guild:
@@ -165,6 +192,9 @@ class NinjaBridge(commands.Bot):
             await self.get_direct(message.guild.id).send(to_relay_text(payload, template))
 
     async def close(self) -> None:
+        if self.history_task:
+            self.history_task.cancel()
+            await asyncio.gather(self.history_task, return_exceptions=True)
         await asyncio.gather(*(client.close() for client in self.ssn_clients.values()), return_exceptions=True)
         await asyncio.gather(*(hub.close() for hub in self.direct_hubs.values()), return_exceptions=True)
         self.store.close()
