@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import random
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -23,6 +24,9 @@ class TwitchAdapter:
         self.task: asyncio.Task[None] | None = None
         self.queue: asyncio.Queue[str] = asyncio.Queue(maxsize=200)
         self.oauth = OAuthToken("TWITCH", "https://id.twitch.tv/oauth2/token")
+        self.client_id = os.getenv("TWITCH_CLIENT_ID", "")
+        self.session: aiohttp.ClientSession | None = None
+        self.avatar_cache: dict[str, tuple[float, str]] = {}
 
     def start(self) -> None:
         self.task = asyncio.create_task(self.run(), name=f"twitch-{self.channel}")
@@ -88,12 +92,50 @@ class TwitchAdapter:
         prefix, text = rest.split(" PRIVMSG ", 1)
         _, message = text.split(" :", 1)
         login = prefix.split("!", 1)[0].lstrip(":")
-        await self.handler({"type": "twitch", "id": tags.get("id", ""), "userid": tags.get("user-id", login), "chatname": tags.get("display-name", login), "username": login, "chatmessage": message, "chatimg": "", "nameColor": tags.get("color", ""), "source": "direct"})
+        user_id = tags.get("user-id", "")
+        avatar_url = await self.get_avatar(user_id, login)
+        await self.handler({"type": "twitch", "id": tags.get("id", ""), "userid": user_id or login, "chatname": tags.get("display-name", login), "username": login, "chatmessage": message, "chatimg": avatar_url, "nameColor": tags.get("color", ""), "source": "direct"})
+
+    async def get_avatar(self, user_id: str, login: str) -> str:
+        cache_key = user_id or login.casefold()
+        cached = self.avatar_cache.get(cache_key)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+        if not self.client_id or not self.oauth.configured:
+            return ""
+        if not self.session or self.session.closed:
+            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
+        params = {"id": user_id} if user_id else {"login": login}
+        try:
+            for attempt in range(2):
+                token = await self.oauth.get(force_refresh=attempt == 1)
+                async with self.session.get(
+                    "https://api.twitch.tv/helix/users",
+                    params=params,
+                    headers={"Authorization": f"Bearer {token}", "Client-Id": self.client_id},
+                ) as response:
+                    if response.status == 401 and not attempt:
+                        continue
+                    body = await response.json(content_type=None)
+                    if response.status >= 400:
+                        logging.warning("Twitch avatar lookup failed with HTTP %s", response.status)
+                        break
+                    users = body.get("data", []) if isinstance(body, dict) else []
+                    avatar_url = str(users[0].get("profile_image_url", "")) if users else ""
+                    lifetime = 24 * 60 * 60 if avatar_url else 5 * 60
+                    self.avatar_cache[cache_key] = (time.monotonic() + lifetime, avatar_url)
+                    return avatar_url
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            logging.exception("Twitch avatar lookup failed")
+        self.avatar_cache[cache_key] = (time.monotonic() + 5 * 60, "")
+        return ""
 
     async def close(self) -> None:
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
+        if self.session and not self.session.closed:
+            await self.session.close()
 
 
 class YouTubeAdapter:
