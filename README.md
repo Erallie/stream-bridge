@@ -22,7 +22,6 @@ StreamBridge can relay conversations between:
 - Twitch
 - YouTube
 - Kick
-- TikTok through Social Stream Ninja
 - Other platforms supported by your Social Stream Ninja session
 
 When direct connections are active, messages received from one streaming platform can be forwarded to the other enabled platforms and Discord.
@@ -59,8 +58,6 @@ StreamBridge supports two relay methods:
 - **Social Stream Ninja mode:** StreamBridge sends messages through a configured Social Stream Ninja session.
 
 If Social Stream Ninja becomes available, StreamBridge can switch to SSN automatically. If SSN goes offline, StreamBridge switches back to its configured direct connections.
-
-TikTok support requires Social Stream Ninja.
 
 ### Duplicate and loop prevention
 
@@ -108,7 +105,7 @@ could produce:
 
 Use the official StreamBridge invitation link:
 
-[Invite StreamBridge to Discord](YOUR_DISCORD_BOT_INVITE_LINK)
+[Invite StreamBridge to Discord](https://discord.com/oauth2/authorize?client_id=1538972596165419069)
 
 When inviting StreamBridge, select the server where you have permission to add bots.
 
@@ -435,7 +432,6 @@ Direct mode continues working even when the computer running Social Stream Ninja
 
 ### Social Stream Ninja mode supports
 
-- TikTok
 - Twitch
 - YouTube
 - Kick
@@ -530,10 +526,6 @@ Each generated link expires after ten minutes.
 ### The wrong YouTube or Kick account appears
 
 Sign out of that platform in your browser, open a private/incognito window, sign into the intended broadcaster account, and generate a new authorization link.
-
-### TikTok is unavailable
-
-TikTok requires a working Social Stream Ninja connection. It is not available through StreamBridge’s direct mode.
 
 ## Support
 
