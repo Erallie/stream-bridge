@@ -149,7 +149,7 @@ class NinjaBridge(commands.Bot):
         channel_ids = set(config.channel_ids)
         if config.discord_relay_channel_id:
             channel_ids.add(config.discord_relay_channel_id)
-        text = "NinjaBridge switched to Social Stream Ninja transport." if connected else "NinjaBridge lost SSN and switched to direct platform connections."
+        text = "-# NinjaBridge switched to Social Stream Ninja transport." if connected else "-# NinjaBridge lost SSN and switched to direct platform connections."
         guild = self.get_guild(guild_id)
         for channel_id in channel_ids:
             channel = guild.get_channel(int(channel_id)) if guild else None
