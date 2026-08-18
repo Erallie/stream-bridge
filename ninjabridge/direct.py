@@ -52,6 +52,7 @@ class TwitchAdapter:
                     await socket.send(f"PASS oauth:{token}")
                     await socket.send(f"NICK {username}")
                     await socket.send(f"JOIN #{self.channel}")
+                    logging.info("Direct Twitch connected as %s and joined #%s", username, self.channel)
                     attempt = 0
                     sender = asyncio.create_task(self.sender(socket))
                     try:
@@ -61,6 +62,8 @@ class TwitchAdapter:
                                     await socket.send("PONG :tmi.twitch.tv")
                                 elif "Login authentication failed" in line:
                                     raise RuntimeError("Twitch rejected the OAuth token")
+                                elif " NOTICE " in line and any(reason in line for reason in ("msg_channel_suspended", "msg_banned", "msg_requires_verified_phone_number")):
+                                    logging.error("Twitch refused chat access for #%s: %s", self.channel, line)
                                 elif " PRIVMSG " in line:
                                     await self.parse_message(line)
                     finally:
@@ -139,12 +142,12 @@ class TwitchAdapter:
 
 
 class YouTubeAdapter:
-    def __init__(self, handler: Handler) -> None:
+    def __init__(self, handler: Handler, oauth: OAuthToken) -> None:
         self.live_chat_id = ""
         self.handler = handler
         self.task: asyncio.Task[None] | None = None
         self.page_token = ""
-        self.oauth = OAuthToken("YOUTUBE", "https://oauth2.googleapis.com/token")
+        self.oauth = oauth
         self.session: aiohttp.ClientSession | None = None
         self.waiting_for_broadcast = False
 
@@ -244,7 +247,7 @@ class YouTubeAdapter:
 
 
 class DirectHub:
-    def __init__(self, handler: Handler, twitch_channel: str = "", youtube_enabled: bool = False) -> None:
+    def __init__(self, handler: Handler, twitch_channel: str = "", youtube_oauth: OAuthToken | None = None) -> None:
         self.adapters: dict[str, Any] = {}
         self.reflections = ReflectionTracker()
 
@@ -258,8 +261,8 @@ class DirectHub:
 
         if twitch_channel:
             self.adapters["twitch"] = TwitchAdapter(twitch_channel, platform_handler("twitch"))
-        if youtube_enabled:
-            self.adapters["youtube"] = YouTubeAdapter(platform_handler("youtube"))
+        if youtube_oauth:
+            self.adapters["youtube"] = YouTubeAdapter(platform_handler("youtube"), youtube_oauth)
 
     def start(self) -> None:
         for adapter in self.adapters.values():

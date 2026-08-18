@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from unittest.mock import Mock
 
 from ninjabridge.direct import TwitchAdapter, YouTubeAdapter
 from ninjabridge.kick import broadcaster_id, kick_chat_payload
@@ -45,7 +46,7 @@ class DirectAdapterTests(unittest.TestCase):
             pass
 
         async def exercise() -> None:
-            adapter = YouTubeAdapter(handler)
+            adapter = YouTubeAdapter(handler, Mock())
 
             async def request(session, method, url, **kwargs):
                 self.assertEqual(url, "https://www.googleapis.com/youtube/v3/liveBroadcasts")
@@ -65,7 +66,7 @@ class DirectAdapterTests(unittest.TestCase):
             pass
 
         async def exercise() -> None:
-            adapter = YouTubeAdapter(handler)
+            adapter = YouTubeAdapter(handler, Mock())
 
             async def request(session, method, url, **kwargs):
                 return 200, {"items": []}

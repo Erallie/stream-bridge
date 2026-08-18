@@ -100,49 +100,45 @@ The access token refreshes automatically. The Pi makes an outbound secure WebSoc
 
 ## YouTube OAuth setup
 
-YouTube does not provide a permanent access token. NinjaBridge stores a refresh token and obtains new short-lived access tokens automatically.
+Create one Google OAuth application for NinjaBridge. Each Discord server then privately authorizes its own YouTube channel with `/direct youtube`; encrypted refresh tokens are stored separately in the database.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project.
 2. Enable **YouTube Data API v3**.
 3. Configure the OAuth consent screen. For a testing app, add the Google account that owns the posting YouTube channel as a test user.
-4. Create an OAuth 2.0 Client ID of type **Desktop app**.
-5. Put its client ID and client secret into `YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET` in `.env` on a computer with a browser.
-6. Run:
+4. Create an OAuth 2.0 Client ID of type **Web application**.
+5. Add `https://ninjabridge-webhook.YOUR_DOMAIN/youtube/oauth/callback` as an authorized redirect URI. It must exactly match `YOUTUBE_OAUTH_REDIRECT_URI` in `.env`.
+6. Put only the app's client ID, client secret, and redirect URI in `.env`. Do not put a YouTube refresh token there.
+7. Add every Google account that will authorize while the consent screen is in **Testing** to the app's test-user list.
+8. Restart NinjaBridge. In each Discord server, an administrator runs `/direct youtube` and opens the private link while signed into the YouTube account whose channel should be connected.
 
-   ```bash
-   python -m ninjabridge.authorize youtube
-   ```
-
-7. Sign into the Google account whose YouTube channel should post. The helper requests `youtube.force-ssl`, saves `data/youtube-oauth.env`, and asks Google for offline access.
-8. Copy the three generated lines into the Pi's `.env`, then securely delete the temporary file.
-9. Run `/direct youtube`. NinjaBridge automatically finds the authorized channel's active livestream chat. You can enable this before going live; it keeps checking until an active chat exists.
+NinjaBridge automatically discovers that account's active livestream chat. Authorization can be completed before going live; NinjaBridge keeps checking until an active chat exists.
 
 OAuth apps left in Google's **Testing** publishing status may receive refresh tokens that expire after seven days. Move the consent screen to Production when appropriate; unverified personal apps can still show a warning and have user limits.
 
 ## Direct Kick without opening router ports
 
-Kick sends incoming chat as HTTPS webhooks and returns each broadcaster's OAuth authorization through HTTPS. By default, NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel exposes only those two paths over an outbound connection. You do not forward a router port. If that local port is already occupied, set `KICK_WEBHOOK_PORT` to a free port in `.env` and use that same port for both services in the Cloudflare tunnel configuration.
+Kick sends incoming chat as HTTPS webhooks. Kick and YouTube return each user's OAuth authorization through HTTPS. By default, NinjaBridge listens only on `127.0.0.1:8765`; a named Cloudflare Tunnel carries those routes over an outbound connection. You do not forward a router port. If that local port is already occupied, set `KICK_WEBHOOK_PORT` to a free port in `.env` and use that same port in the Cloudflare tunnel configuration.
 
 1. Add a domain to Cloudflare.
-2. Create one Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Select **Create a bot for this app**. Set its OAuth redirect URL to `https://kick-webhook.YOUR_DOMAIN/kick/oauth/callback` and its separate webhook URL to `https://kick-webhook.YOUR_DOMAIN/kick/webhook`.
+2. Create one Kick developer application in the [Kick Developer portal](https://kick.com/settings/developer). Select **Create a bot for this app**. Set its OAuth redirect URL to `https://ninjabridge-webhook.YOUR_DOMAIN/kick/oauth/callback` and its separate webhook URL to `https://ninjabridge-webhook.YOUR_DOMAIN/kick/webhook`.
 3. Select only **Read user information**, **Write to Chat feed**, and **Subscribe to events**. Put the application's `KICK_CLIENT_ID`, `KICK_CLIENT_SECRET`, and exact `KICK_OAUTH_REDIRECT_URI` in `.env`. Do not put a broadcaster refresh token or broadcaster ID in `.env`.
-4. Generate one database-encryption key and place the printed value in `KICK_TOKEN_ENCRYPTION_KEY` in `.env`:
+4. Generate one database-encryption key and place the printed value in `TOKEN_ENCRYPTION_KEY` in `.env`. It protects both Kick and YouTube per-server authorizations:
 
    ```bash
    cd /opt/ninjabridge
    bot-env/bin/python -m ninjabridge.keygen
    ```
 
-   Back up this key securely. Changing or losing it makes saved Kick authorizations unreadable.
+   Back up this key securely. Changing or losing it makes saved Kick and YouTube authorizations unreadable.
 5. Install `cloudflared` outside `bot-env` using Cloudflare's current Debian/Raspberry Pi instructions, then authenticate and create a named tunnel:
 
    ```bash
    cloudflared tunnel login
    cloudflared tunnel create ninjabridge
-   cloudflared tunnel route dns ninjabridge kick-webhook.YOUR_DOMAIN
+   cloudflared tunnel route dns ninjabridge ninjabridge-webhook.YOUR_DOMAIN
    ```
 
-6. Copy `deploy/cloudflared-config.yml.example` to `~/.cloudflared/config.yml`. Replace the tunnel UUID, Linux username, and hostname. The single hostname rule intentionally routes both `/kick/webhook` and `/kick/oauth/callback` to NinjaBridge. If `KICK_WEBHOOK_PORT` is `8766`, change `8765` to `8766` in this file too.
+6. Copy `deploy/cloudflared-config.yml.example` to `~/.cloudflared/config.yml`. Replace the tunnel UUID, Linux username, and hostname. The single hostname rule intentionally routes `/kick/webhook`, `/kick/oauth/callback`, and `/youtube/oauth/callback` to NinjaBridge. If `KICK_WEBHOOK_PORT` is `8766`, change `8765` to `8766` in this file too.
 7. Validate the configuration, then install the tunnel service:
 
    ```bash
@@ -156,7 +152,7 @@ Kick sends incoming chat as HTTPS webhooks and returns each broadcaster's OAuth 
 
    ```bash
    curl -i http://127.0.0.1:8765/kick/oauth/callback
-   curl -i https://kick-webhook.YOUR_DOMAIN/kick/oauth/callback
+   curl -i https://ninjabridge-webhook.YOUR_DOMAIN/kick/oauth/callback
    ```
 
    Use your configured local port in the first command.
@@ -177,7 +173,7 @@ When SSN is connected, NinjaBridge routes through SSN and ignores direct inbound
 - `/setup` saves an SSN session and relay targets.
 - `/forward add`, `/forward remove`, `/forward clear` manage Discord → streaming chat channels.
 - `/receive set`, `/receive clear` manage streaming chats → Discord.
-- `/direct twitch` chooses the Twitch channel for this Discord server. `/direct youtube` automatically follows the authorized YouTube account's active livestream. `/direct kick` privately authorizes a separate Kick broadcaster for the current Discord server.
+- `/direct twitch` chooses the channel joined by the shared Twitch bot account. `/direct youtube` privately authorizes this server's YouTube channel and automatically follows its active livestream. `/direct kick` privately authorizes this server's Kick broadcaster.
 - `/direct message` customizes direct relay text with `{name}`, `{message}`, and `{platform}`. An empty value restores `{name} said: {message}`.
 - `/direct disable platform` disables one direct adapter.
 - `/switchmessages` controls transport-switch notices.

@@ -26,7 +26,7 @@ class KickGatewayTests(unittest.TestCase):
                 "KICK_CLIENT_ID": "client",
                 "KICK_CLIENT_SECRET": "secret",
                 "KICK_OAUTH_REDIRECT_URI": "https://example.com/kick/oauth/callback",
-                "KICK_TOKEN_ENCRYPTION_KEY": key,
+                "TOKEN_ENCRYPTION_KEY": key,
             }
             with patch.dict(os.environ, environment, clear=True):
                 store = ConfigStore(str(Path(directory) / "bot.sqlite"))
@@ -50,7 +50,7 @@ class KickGatewayTests(unittest.TestCase):
                 "KICK_CLIENT_ID": "client",
                 "KICK_CLIENT_SECRET": "secret",
                 "KICK_OAUTH_REDIRECT_URI": "https://example.com/kick/oauth/callback",
-                "KICK_TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode("ascii"),
+                "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode("ascii"),
             }
             with patch.dict(os.environ, environment, clear=True):
                 store = ConfigStore(str(Path(directory) / "bot.sqlite"))

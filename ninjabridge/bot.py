@@ -18,6 +18,7 @@ from ninjabridge.kick import KickGateway
 from ninjabridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message, validate_direct_relay_template
 from ninjabridge.relay import ReflectionTracker
 from ninjabridge.ssn import SsnClient
+from ninjabridge.youtube import YouTubeGateway
 
 load_dotenv()
 
@@ -42,7 +43,8 @@ class NinjaBridge(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix=commands.when_mentioned, intents=intents, application_id=int(os.environ["DISCORD_CLIENT_ID"]))
         self.store = ConfigStore(os.getenv("DATABASE_PATH", "./data/bot.sqlite"))
-        self.kick = KickGateway(self.store, self.handle_kick_event, self.handle_kick_authorized)
+        self.youtube = YouTubeGateway(self.store, self.handle_youtube_authorized)
+        self.kick = KickGateway(self.store, self.handle_kick_event, self.handle_kick_authorized, self.youtube)
         self.ssn_clients: dict[int, SsnClient] = {}
         self.direct_hubs: dict[int, DirectHub] = {}
         self.webhooks: dict[int, discord.Webhook] = {}
@@ -51,6 +53,7 @@ class NinjaBridge(commands.Bot):
         self.ssn_url = os.getenv("SSN_WEBSOCKET_URL", "wss://io.socialstream.ninja")
 
     async def setup_hook(self) -> None:
+        self.youtube.load_accounts()
         await self.kick.start()
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
@@ -111,10 +114,7 @@ class NinjaBridge(commands.Bot):
             hub = DirectHub(
                 received,
                 str(self.store.get_setting(guild, "direct_twitch_channel", "")),
-                bool(
-                    self.store.get_setting(guild, "direct_youtube_enabled", False)
-                    or self.store.get_setting(guild, "direct_youtube_live_chat_id", "")
-                ),
+                self.youtube.token(guild_id),
             )
             self.direct_hubs[guild_id] = hub
             hub.start()
@@ -133,6 +133,10 @@ class NinjaBridge(commands.Bot):
 
     async def handle_kick_authorized(self, guild_id: int, username: str) -> None:
         logging.info("Discord guild %s authorized Kick channel %s", guild_id, username)
+
+    async def handle_youtube_authorized(self, guild_id: int, title: str) -> None:
+        logging.info("Discord guild %s authorized YouTube channel %s", guild_id, title)
+        await self.reset_direct(guild_id)
 
     async def send_direct(self, guild_id: int, text: str, exclude: str = "") -> None:
         tasks = [self.get_direct(guild_id).send(text, exclude)]
@@ -250,6 +254,7 @@ class NinjaBridge(commands.Bot):
         await asyncio.gather(*(client.close() for client in self.ssn_clients.values()), return_exceptions=True)
         await asyncio.gather(*(hub.close() for hub in self.direct_hubs.values()), return_exceptions=True)
         await self.kick.close()
+        await self.youtube.close()
         self.store.close()
         await super().close()
 
@@ -337,10 +342,12 @@ async def direct_twitch(i: discord.Interaction, channel: str) -> None:
 @direct_group.command(name="youtube", description="Use the authorized YouTube channel's active livestream chat")
 async def direct_youtube(i: discord.Interaction) -> None:
     assert i.guild_id
-    bot.store.set_setting(str(i.guild_id), "direct_youtube_enabled", True)
-    bot.store.remove_setting(str(i.guild_id), "direct_youtube_live_chat_id")
-    await bot.reset_direct(i.guild_id)
-    await i.response.send_message("Direct YouTube enabled. NinjaBridge will automatically use the authorized channel's active livestream chat.", ephemeral=True)
+    try:
+        url = bot.youtube.authorization_url(i.guild_id, i.user.id, bot.kick.listener_ready)
+    except RuntimeError as error:
+        await i.response.send_message(str(error), ephemeral=True)
+        return
+    await i.response.send_message(f"[Authorize this server's YouTube channel]({url})\nThis private link expires in 10 minutes.", ephemeral=True)
 
 
 @direct_group.command(name="kick", description="Privately authorize this server's broadcaster account with Kick")
@@ -365,7 +372,8 @@ async def direct_disable(i: discord.Interaction, platform: str) -> None:
     if platform == "kick":
         await bot.kick.disable(i.guild_id)
     elif platform == "youtube":
-        bot.store.set_setting(str(i.guild_id), "direct_youtube_enabled", False)
+        await bot.youtube.disable(i.guild_id)
+        bot.store.remove_setting(str(i.guild_id), "direct_youtube_enabled")
         bot.store.remove_setting(str(i.guild_id), "direct_youtube_live_chat_id")
     else:
         bot.store.set_setting(str(i.guild_id), "direct_twitch_channel", "")
@@ -407,7 +415,7 @@ async def status(i: discord.Interaction) -> None:
     mirror = f"<#{c.discord_relay_channel_id}>" if c and c.discord_relay_channel_id else "off"
     ssn_state = "connected" if i.guild_id in bot.ssn_clients and bot.ssn_clients[i.guild_id].connected else "disconnected"
     direct_platforms = [
-        f"kick ({bot.kick.username(i.guild_id)})" if platform == "kick" else platform
+        f"kick ({bot.kick.username(i.guild_id)})" if platform == "kick" else f"youtube ({bot.youtube.username(i.guild_id)})" if platform == "youtube" else platform
         for platform in bot.direct_platforms(i.guild_id)
     ]
     direct = ", ".join(direct_platforms) or "none"

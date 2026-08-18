@@ -90,10 +90,11 @@ class KickAccount:
 class KickGateway:
     """One webhook/OAuth service with separately authorized Kick accounts per Discord guild."""
 
-    def __init__(self, store: ConfigStore, handler: KickHandler, on_authorized: AuthorizedHandler) -> None:
+    def __init__(self, store: ConfigStore, handler: KickHandler, on_authorized: AuthorizedHandler, youtube: Any = None) -> None:
         self.store = store
         self.handler = handler
         self.on_authorized = on_authorized
+        self.youtube = youtube
         self.client_id = os.getenv("KICK_CLIENT_ID", "")
         self.client_secret = os.getenv("KICK_CLIENT_SECRET", "")
         self.redirect_uri = os.getenv("KICK_OAUTH_REDIRECT_URI", "")
@@ -110,13 +111,13 @@ class KickGateway:
 
     @staticmethod
     def _load_fernet() -> Fernet | None:
-        key = os.getenv("KICK_TOKEN_ENCRYPTION_KEY", "")
+        key = os.getenv("TOKEN_ENCRYPTION_KEY", "")
         if not key:
             return None
         try:
             return Fernet(key.encode("ascii"))
         except (ValueError, TypeError):
-            logging.error("KICK_TOKEN_ENCRYPTION_KEY is not a valid Fernet key")
+            logging.error("TOKEN_ENCRYPTION_KEY is not a valid Fernet key")
             return None
 
     @property
@@ -135,16 +136,19 @@ class KickGateway:
     async def run_listener(self) -> None:
         while True:
             try:
-                session = await self.get_session()
-                async with session.get("https://api.kick.com/public/v1/public-key") as response:
-                    body = await response.json(content_type=None)
-                    pem = body.get("data", {}).get("public_key") or body.get("public_key") or body.get("data")
-                    if response.status >= 400 or not isinstance(pem, str):
-                        raise RuntimeError(f"Could not load Kick public key (HTTP {response.status})")
-                self.public_key = serialization.load_pem_public_key(pem.encode())
+                if self.client_id:
+                    session = await self.get_session()
+                    async with session.get("https://api.kick.com/public/v1/public-key") as response:
+                        body = await response.json(content_type=None)
+                        pem = body.get("data", {}).get("public_key") or body.get("public_key") or body.get("data")
+                        if response.status >= 400 or not isinstance(pem, str):
+                            raise RuntimeError(f"Could not load Kick public key (HTTP {response.status})")
+                    self.public_key = serialization.load_pem_public_key(pem.encode())
                 app = web.Application(client_max_size=1024 * 1024)
                 app.router.add_post(os.getenv("KICK_WEBHOOK_PATH", "/kick/webhook"), self.webhook)
                 app.router.add_get(os.getenv("KICK_OAUTH_CALLBACK_PATH", "/kick/oauth/callback"), self.oauth_callback)
+                if self.youtube:
+                    app.router.add_get(os.getenv("YOUTUBE_OAUTH_CALLBACK_PATH", "/youtube/oauth/callback"), self.youtube.oauth_callback)
                 self.runner = web.AppRunner(app, access_log=logging.getLogger("ninjabridge.kick.http"))
                 await self.runner.setup()
                 await web.TCPSite(
@@ -197,7 +201,7 @@ class KickGateway:
 
     def authorization_url(self, guild_id: int, discord_user_id: int) -> str:
         if not self.authorization_configured:
-            raise RuntimeError("Set KICK_CLIENT_ID, KICK_CLIENT_SECRET, KICK_OAUTH_REDIRECT_URI, and KICK_TOKEN_ENCRYPTION_KEY in .env")
+            raise RuntimeError("Kick authorization has not been configured by the NinjaBridge owner.")
         if not self.listener_ready:
             raise RuntimeError("The Kick gateway is still connecting. Try this command again in a moment.")
         self._prune_pending()

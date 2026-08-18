@@ -64,6 +64,12 @@ class CommandMetadataTests(unittest.TestCase):
 
         self.assertEqual(kick.parameters, [])
 
+    def test_direct_youtube_authorizes_without_requesting_a_live_chat_id(self) -> None:
+        direct = next(command for command in bot.tree.get_commands() if command.name == "direct")
+        youtube = next(command for command in direct.commands if command.name == "youtube")
+
+        self.assertEqual(youtube.parameters, [])
+
 
 if __name__ == "__main__":
     unittest.main()
