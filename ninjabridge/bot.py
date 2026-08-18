@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from ninjabridge.database import ConfigStore, GuildConfig
 from ninjabridge.direct import DirectHub
 from ninjabridge.kick import KickGateway
-from ninjabridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, to_relay_text, to_ssn_message, validate_direct_relay_template
+from ninjabridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message, validate_direct_relay_template
 from ninjabridge.relay import ReflectionTracker
 from ninjabridge.ssn import SsnClient
 
@@ -160,9 +160,13 @@ class NinjaBridge(commands.Bot):
                     logging.exception("Could not announce transport switch in %s", channel_id)
 
     async def handle_ssn(self, guild_id: int, data: dict[str, Any]) -> bool:
-        message_text = str(data.get("chatmessage") or "")
+        message_text = ssn_to_plain_text(str(data.get("plainText") or data.get("chatmessage") or ""))
+        display_name = ssn_to_plain_text(str(data.get("chatname") or ""))
+        data["chatmessage"] = message_text
+        data["plainText"] = message_text
+        data["chatname"] = display_name
         content_image = str(data.get("contentimg") or "")
-        if data.get("reflection") or data.get("bot") or not data.get("chatname") or not (message_text or content_image):
+        if data.get("reflection") or data.get("bot") or not display_name or not (message_text or content_image):
             return False
         platform = str(data.get("type", "unknown")).lower()
         tracker = self.ssn_reflections.get(guild_id)
@@ -175,7 +179,7 @@ class NinjaBridge(commands.Bot):
             return False
         config = self.store.get(str(guild_id))
         if config and config.discord_relay_channel_id and self.store.claim_delivery(str(guild_id), key, "discord"):
-            await self.send_webhook(guild_id, int(config.discord_relay_channel_id), str(data["chatname"]), str(data.get("chatimg", "")), platform, message_text or content_image)
+            await self.send_webhook(guild_id, int(config.discord_relay_channel_id), display_name, str(data.get("chatimg", "")), platform, message_text or content_image)
         return True
 
     async def handle_direct(self, guild_id: int, data: dict[str, Any]) -> None:

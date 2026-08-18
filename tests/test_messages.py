@@ -1,6 +1,6 @@
 import unittest
 
-from ninjabridge.messages import render_discord_content, to_relay_text, validate_direct_relay_template
+from ninjabridge.messages import render_discord_content, ssn_to_plain_text, to_relay_text, validate_direct_relay_template
 
 
 class MessageTests(unittest.TestCase):
@@ -35,6 +35,18 @@ class MessageTests(unittest.TestCase):
     def test_direct_relay_uses_plain_text_instead_of_emote_html(self) -> None:
         payload = {"chatname": "Alex", "chatmessage": '<img src="emoji">', "plainText": ":wave:", "type": "discord"}
         self.assertEqual(to_relay_text(payload), "Alex said: :wave:")
+
+    def test_ssn_html_entities_are_decoded_for_discord(self) -> None:
+        self.assertEqual(ssn_to_plain_text("I&#039;m from Twitch &amp; Kick"), "I'm from Twitch & Kick")
+
+    def test_ssn_emote_html_retains_alt_text(self) -> None:
+        self.assertEqual(
+            ssn_to_plain_text('Hello <img class="regular-emote" src="emoji.png" alt=":wave:"><br>friend'),
+            "Hello :wave:\nfriend",
+        )
+
+    def test_ssn_script_and_style_markup_is_not_relayed(self) -> None:
+        self.assertEqual(ssn_to_plain_text("hello<script>alert(1)</script><style>x</style> world"), "hello world")
 
 
 if __name__ == "__main__":

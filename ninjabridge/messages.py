@@ -3,6 +3,7 @@ from __future__ import annotations
 import string
 import html
 import re
+from html.parser import HTMLParser
 from typing import Any
 
 import discord
@@ -10,6 +11,41 @@ import discord
 DEFAULT_DIRECT_RELAY_TEMPLATE = "{name} said: {message}"
 DIRECT_RELAY_FIELDS = frozenset({"name", "message", "platform"})
 DISCORD_TOKEN = re.compile(r"<(?:(a?):([A-Za-z0-9_]+):(\d+)|@!?([0-9]+)|@&([0-9]+)|#([0-9]+))>")
+
+
+class _SsnTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.ignored_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style"}:
+            self.ignored_depth += 1
+        elif self.ignored_depth == 0 and tag == "img":
+            attributes = dict(attrs)
+            self.parts.append(attributes.get("alt") or attributes.get("title") or "")
+        elif self.ignored_depth == 0 and tag == "br":
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style"} and self.ignored_depth:
+            self.ignored_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self.ignored_depth == 0:
+            self.parts.append(data)
+
+
+def ssn_to_plain_text(value: str) -> str:
+    """Decode SSN's HTML entities and retain readable custom-emote alt text."""
+    parser = _SsnTextParser()
+    try:
+        parser.feed(value)
+        parser.close()
+    except Exception:
+        return html.unescape(value)
+    return "".join(parser.parts)
 
 
 def render_discord_content(
