@@ -1,5 +1,6 @@
 import os
 import unittest
+from types import SimpleNamespace
 
 os.environ.setdefault("DISCORD_CLIENT_ID", "123456789012345678")
 
@@ -26,6 +27,20 @@ class CommandMetadataTests(unittest.TestCase):
         finally:
             bot.ssn_reflections.pop(1, None)
             bot.ssn_reflections.pop(2, None)
+
+    def test_direct_platforms_reports_configured_adapters(self) -> None:
+        guild_id = 987654321
+        bot.direct_hubs[guild_id] = SimpleNamespace(adapters={"twitch": object(), "youtube": object()})
+        try:
+            self.assertEqual(bot.direct_platforms(guild_id), ["twitch", "youtube"])
+        finally:
+            bot.direct_hubs.pop(guild_id, None)
+
+    def test_direct_platforms_is_empty_without_configuration(self) -> None:
+        guild_id = 987654322
+        bot.direct_hubs.pop(guild_id, None)
+
+        self.assertEqual(bot.direct_platforms(guild_id), [])
 
     def test_every_command_and_subcommand_has_a_description(self) -> None:
         commands = bot.tree.get_commands()

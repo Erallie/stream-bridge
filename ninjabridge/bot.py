@@ -140,6 +140,13 @@ class NinjaBridge(commands.Bot):
             if isinstance(result, Exception):
                 logging.error("Direct relay send failed: %s", result)
 
+    def direct_platforms(self, guild_id: int) -> list[str]:
+        hub = self.direct_hubs.get(guild_id)
+        platforms = list(hub.adapters) if hub else []
+        if self.kick.connected(guild_id):
+            platforms.append("kick")
+        return platforms
+
     async def transport_status(self, guild_id: int, connected: bool) -> None:
         if not self.store.get_setting(str(guild_id), "transport_announcements", True):
             return
@@ -150,6 +157,8 @@ class NinjaBridge(commands.Bot):
         if config.discord_relay_channel_id:
             channel_ids.add(config.discord_relay_channel_id)
         text = "-# NinjaBridge switched to Social Stream Ninja transport." if connected else "-# NinjaBridge lost SSN and switched to direct platform connections."
+        if not connected and not self.direct_platforms(guild_id):
+            text += "\n-# No platforms have been set up for direct connection. Messages will not be relayed."
         guild = self.get_guild(guild_id)
         for channel_id in channel_ids:
             channel = guild.get_channel(int(channel_id)) if guild else None
@@ -392,10 +401,10 @@ async def status(i: discord.Interaction) -> None:
     channels = ", ".join(f"<#{x}>" for x in c.channel_ids) if c else "none"
     mirror = f"<#{c.discord_relay_channel_id}>" if c and c.discord_relay_channel_id else "off"
     ssn_state = "connected" if i.guild_id in bot.ssn_clients and bot.ssn_clients[i.guild_id].connected else "disconnected"
-    hub = bot.direct_hubs.get(i.guild_id)
-    direct_platforms = list(hub.adapters if hub else [])
-    if bot.kick.connected(i.guild_id):
-        direct_platforms.append(f"kick ({bot.kick.username(i.guild_id)})")
+    direct_platforms = [
+        f"kick ({bot.kick.username(i.guild_id)})" if platform == "kick" else platform
+        for platform in bot.direct_platforms(i.guild_id)
+    ]
     direct = ", ".join(direct_platforms) or "none"
     template = str(bot.store.get_setting(str(i.guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
     await i.response.send_message(f"Discord channels forwarded: {channels}\nSSN session: {session} ({ssn_state})\nDirect platforms: {direct}\nDirect relay message: `{template}`\nPlatform messages received in Discord: {mirror}", ephemeral=True)
