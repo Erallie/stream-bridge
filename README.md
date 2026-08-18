@@ -162,7 +162,7 @@ NinjaBridge uses one shared local listener and routes each signed event by broad
 
 ## Optional Social Stream Ninja
 
-Run `/setup session_id:YOUR_SESSION relay_targets:twitch,youtube,kick,tiktok`. If the SSN room is protected, also fill in the command's optional `password` field. The command response is private to the administrator, and the password is stored in the local SQLite database.
+Run `/ssn connect session_id:YOUR_SESSION relay_targets:twitch,youtube,kick,tiktok`. If the SSN room is protected, also fill in the command's optional `password` field. The command response is private to the administrator, and the password is stored in the local SQLite database.
 
 In SSN enable remote API control and the option that routes API chat to normal dock/overlay connections. Enable SSN's built-in relay when SSN should own platform-to-platform relay. NinjaBridge ignores reflections, bot messages, its Discord webhook messages, and already-processed event IDs to prevent loops.
 
@@ -170,15 +170,14 @@ When SSN is connected, NinjaBridge routes through SSN and ignores direct inbound
 
 ## Commands
 
-- `/setup` saves an SSN session and relay targets.
+- `/ssn connect` saves an SSN session and relay targets; `/ssn disconnect` disconnects SSN without deleting direct settings.
 - `/forward add`, `/forward remove`, `/forward clear` manage Discord → streaming chat channels.
 - `/receive set`, `/receive clear` manage streaming chats → Discord.
 - `/direct twitch` chooses the channel joined by the shared Twitch bot account. `/direct youtube` privately authorizes this server's YouTube channel and automatically follows its active livestream. `/direct kick` privately authorizes this server's Kick broadcaster.
 - `/direct message` customizes direct relay text with `{name}`, `{message}`, and `{platform}`. An empty value restores `{name} said: {message}`.
 - `/direct disable platform` disables one direct adapter.
 - `/switchmessages` controls transport-switch notices.
-- `/status` displays configuration with the SSN session masked.
-- `/disable` disconnects SSN without deleting direct settings.
+- `/status` displays configuration with the SSN session masked and identifies each configured direct channel/account.
 
 ## Updating and testing
 

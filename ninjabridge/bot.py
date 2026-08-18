@@ -36,6 +36,16 @@ def webhook_username(display_name: str, platform: str) -> str:
     return combined[:80]
 
 
+def format_status(channels: str, session: str, ssn_state: str, direct: str, template: str, mirror: str) -> str:
+    return (
+        f"**Discord channels forwarded:** {channels}\n"
+        f"**SSN session:** {session} ({ssn_state})\n"
+        f"**Direct platforms:** {direct}\n"
+        f"**Direct relay message:** `{template}`\n"
+        f"**Platform messages received in Discord:** {mirror}"
+    )
+
+
 class NinjaBridge(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.none()
@@ -265,16 +275,20 @@ class NinjaBridge(commands.Bot):
 
 bot = NinjaBridge()
 admin = app_commands.default_permissions(administrator=True)
+ssn_group = app_commands.Group(
+    name="ssn",
+    description="Configure the optional Social Stream Ninja connection",
+    default_permissions=discord.Permissions(administrator=True),
+)
 
 
-@bot.tree.command(name="setup", description="Connect this server to Social Stream Ninja")
-@admin
+@ssn_group.command(name="connect", description="Connect this server to a Social Stream Ninja session")
 @app_commands.describe(
     session_id="The SSN session ID that NinjaBridge should join",
     relay_targets="Comma-separated platforms SSN should relay messages to",
     password="The SSN session password, if the session is protected",
 )
-async def setup(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok", password: str = "") -> None:
+async def ssn_connect(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok", password: str = "") -> None:
     assert i.guild_id
     bot.store.set_session(str(i.guild_id), session_id.strip(), parse_list(relay_targets))
     bot.store.set_setting(str(i.guild_id), "ssn_password", password)
@@ -283,6 +297,17 @@ async def setup(i: discord.Interaction, session_id: str, relay_targets: str = "t
     if config:
         bot.get_ssn(i.guild_id, config)
     await i.response.send_message("SSN session and relay targets saved.", ephemeral=True)
+
+
+@ssn_group.command(name="disconnect", description="Disconnect SSN without removing direct platform connections")
+async def ssn_disconnect(i: discord.Interaction) -> None:
+    assert i.guild_id
+    bot.store.clear_session(str(i.guild_id))
+    await bot.reset_ssn(i.guild_id)
+    await i.response.send_message("SSN disconnected.", ephemeral=True)
+
+
+bot.tree.add_command(ssn_group)
 
 
 forward_group = app_commands.Group(name="forward", description="Choose Discord channels whose messages are sent to streaming chats", default_permissions=discord.Permissions(administrator=True))
@@ -416,24 +441,18 @@ async def status(i: discord.Interaction) -> None:
     channels = ", ".join(f"<#{x}>" for x in c.channel_ids) if c else "none"
     mirror = f"<#{c.discord_relay_channel_id}>" if c and c.discord_relay_channel_id else "off"
     ssn_state = "connected" if i.guild_id in bot.ssn_clients and bot.ssn_clients[i.guild_id].connected else "disconnected"
-    direct_platforms = [
-        f"kick ({bot.kick.username(i.guild_id)})" if platform == "kick" else f"youtube ({bot.youtube.username(i.guild_id)})" if platform == "youtube" else platform
-        for platform in bot.direct_platforms(i.guild_id)
-    ]
+    direct_platforms = []
+    for platform in bot.direct_platforms(i.guild_id):
+        if platform == "twitch":
+            twitch_channel = str(bot.store.get_setting(str(i.guild_id), "direct_twitch_channel", ""))
+            direct_platforms.append(f"twitch ({twitch_channel})" if twitch_channel else "twitch")
+        elif platform == "youtube":
+            direct_platforms.append(f"youtube ({bot.youtube.username(i.guild_id)})")
+        elif platform == "kick":
+            direct_platforms.append(f"kick ({bot.kick.username(i.guild_id)})")
     direct = ", ".join(direct_platforms) or "none"
     template = str(bot.store.get_setting(str(i.guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
-    await i.response.send_message(f"**Discord channels forwarded:** {channels}\n**SSN session:** {session} ({ssn_state})\n**Direct platforms:** {direct}\n**Direct relay message:** `{template}`\n**Platform messages received in Discord:** {mirror}", ephemeral=True)
-
-
-@bot.tree.command(name="disable", description="Disconnect this server from SSN without removing direct connections")
-@admin
-async def disable(i: discord.Interaction) -> None:
-    assert i.guild_id
-    bot.store.clear_session(str(i.guild_id))
-    await bot.reset_ssn(i.guild_id)
-    await i.response.send_message("SSN forwarding disabled.", ephemeral=True)
-
-
+    await i.response.send_message(format_status(channels, session, ssn_state, direct, template, mirror), ephemeral=True)
 def main() -> None:
     missing = [x for x in ("DISCORD_TOKEN", "DISCORD_CLIENT_ID") if not os.getenv(x)]
     if missing:

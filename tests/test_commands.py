@@ -4,11 +4,20 @@ from types import SimpleNamespace
 
 os.environ.setdefault("DISCORD_CLIENT_ID", "123456789012345678")
 
-from ninjabridge.bot import bot, webhook_username
+from ninjabridge.bot import bot, format_status, webhook_username
 from ninjabridge.relay import ReflectionTracker
 
 
 class CommandMetadataTests(unittest.TestCase):
+    def test_status_labels_remain_bold(self) -> None:
+        message = format_status("#chat", "abc••••••", "connected", "twitch (channel)", "{message}", "#relay")
+
+        self.assertIn("**Discord channels forwarded:**", message)
+        self.assertIn("**SSN session:**", message)
+        self.assertIn("**Direct platforms:**", message)
+        self.assertIn("**Direct relay message:**", message)
+        self.assertIn("**Platform messages received in Discord:**", message)
+
     def test_webhook_username_avoids_discord_reserved_names(self) -> None:
         self.assertEqual(webhook_username("Discord Helper", "kick"), "Dis-cord Helper (Kick)")
         self.assertEqual(webhook_username("Clyde", "youtube"), "C-lyde (Youtube)")
@@ -57,6 +66,14 @@ class CommandMetadataTests(unittest.TestCase):
 
         self.assertNotIn("template", names)
         self.assertIn("message", direct_names)
+
+    def test_ssn_commands_are_grouped_and_old_top_level_names_are_gone(self) -> None:
+        commands = {command.name: command for command in bot.tree.get_commands()}
+
+        self.assertNotIn("setup", commands)
+        self.assertNotIn("disable", commands)
+        self.assertIn("ssn", commands)
+        self.assertEqual({command.name for command in commands["ssn"].commands}, {"connect", "disconnect"})
 
     def test_direct_kick_authorizes_without_requesting_an_account_id(self) -> None:
         direct = next(command for command in bot.tree.get_commands() if command.name == "direct")
