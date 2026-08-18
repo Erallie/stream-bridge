@@ -1,6 +1,6 @@
 import unittest
 
-from ninjabridge.messages import to_relay_text, validate_direct_relay_template
+from ninjabridge.messages import render_discord_content, to_relay_text, validate_direct_relay_template
 
 
 class MessageTests(unittest.TestCase):
@@ -19,6 +19,22 @@ class MessageTests(unittest.TestCase):
 
     def test_empty_template_restores_default(self) -> None:
         self.assertEqual(validate_direct_relay_template(""), "{name} said: {message}")
+
+    def test_discord_static_and_animated_emotes_become_ssn_images(self) -> None:
+        rendered, has_emote = render_discord_content("Hi <:wave:123> <a:dance:456>!")
+        self.assertTrue(has_emote)
+        self.assertIn("https://cdn.discordapp.com/emojis/123.png?size=48&amp;quality=lossless", rendered)
+        self.assertIn("https://cdn.discordapp.com/emojis/456.gif?size=48&amp;quality=lossless", rendered)
+        self.assertIn('class="regular-emote"', rendered)
+
+    def test_discord_emote_markup_escapes_text_and_resolves_mentions(self) -> None:
+        rendered, _ = render_discord_content("<b> <@42> <#7> <:ok:9>", {"42": "Alex"}, channels={"7": "general"})
+        self.assertTrue(rendered.startswith("&lt;b&gt; @Alex #general "))
+        self.assertNotIn("<b>", rendered)
+
+    def test_direct_relay_uses_plain_text_instead_of_emote_html(self) -> None:
+        payload = {"chatname": "Alex", "chatmessage": '<img src="emoji">', "plainText": ":wave:", "type": "discord"}
+        self.assertEqual(to_relay_text(payload), "Alex said: :wave:")
 
 
 if __name__ == "__main__":
