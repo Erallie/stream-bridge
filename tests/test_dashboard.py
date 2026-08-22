@@ -73,16 +73,19 @@ def test_dashboard_applies_complete_discord_configuration(tmp_path) -> None:
     dashboard = DashboardAPI(store)
     dashboard.apply_discord_configuration({
         "discord_guild_id": "123",
-        "discord_forward_channel_ids": ["10", "11"],
-        "discord_receive_channel_id": "11",
+        "discord_channel_id": "11",
+        "discord_forward_enabled": False,
+        "discord_receive_enabled": True,
         "transport_announcements": False,
         "ssn_session_id": "session-id",
         "ssn_targets": ["twitch", "tiktok", "future-platform"],
     })
     config = store.get("123")
     assert config is not None
-    assert config.channel_ids == ("10", "11")
+    assert config.channel_ids == ("11",)
     assert config.discord_relay_channel_id == "11"
     assert config.session_id == "session-id"
     assert config.relay_targets == ("twitch", "tiktok", "future-platform")
     assert store.get_setting("123", "transport_announcements") is False
+    assert store.get_setting("123", "discord_forward_enabled") is False
+    assert store.get_setting("123", "discord_receive_enabled") is True

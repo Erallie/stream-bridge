@@ -152,8 +152,17 @@ class DashboardAPI:
         for workspace in workspaces:
             guild_id = str(workspace.get("discord_guild_id") or "")
             config = self.store.get(guild_id) if guild_id else None
-            workspace["discord_forward_channel_ids"] = list(config.channel_ids) if config else []
-            workspace["discord_receive_channel_id"] = config.discord_relay_channel_id if config else None
+            workspace["discord_channel_id"] = (
+                config.discord_relay_channel_id
+                if config and config.discord_relay_channel_id
+                else config.channel_ids[0] if config and config.channel_ids else None
+            )
+            workspace["discord_forward_enabled"] = bool(
+                self.store.get_setting(guild_id, "discord_forward_enabled", True)
+            ) if guild_id else True
+            workspace["discord_receive_enabled"] = bool(
+                self.store.get_setting(guild_id, "discord_receive_enabled", True)
+            ) if guild_id else True
             if config:
                 workspace["ssn_session_id"] = config.session_id
                 workspace["ssn_targets"] = list(config.relay_targets)
@@ -196,12 +205,17 @@ class DashboardAPI:
         if guild_id:
             channels = await self.get_discord_channels(guild_id)
             channel_ids = {channel["id"] for channel in channels}
-            forwarding = body.get("discord_forward_channel_ids", [])
-            receiving = str(body.get("discord_receive_channel_id") or "")
-            if not isinstance(forwarding, list) or any(str(value) not in channel_ids for value in forwarding):
-                raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid Discord forwarding channel"}), content_type="application/json")
-            if receiving and receiving not in channel_ids:
-                raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid Discord receiving channel"}), content_type="application/json")
+            discord_channel_id = str(body.get("discord_channel_id") or "")
+            if (
+                not discord_channel_id
+                and (
+                    bool(body.get("discord_forward_enabled", True))
+                    or bool(body.get("discord_receive_enabled", True))
+                )
+            ):
+                raise web.HTTPBadRequest(text=json.dumps({"error": "Select a Discord channel or disable both Discord relay directions"}), content_type="application/json")
+            if discord_channel_id and discord_channel_id not in channel_ids:
+                raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid Discord channel"}), content_type="application/json")
 
     async def available_discord_guilds(self, user_id: str) -> list[dict[str, str]]:
         identity = next(
@@ -248,10 +262,13 @@ class DashboardAPI:
         guild_id = str(body.get("discord_guild_id") or "")
         if not guild_id:
             return
+        channel_id = str(body.get("discord_channel_id") or "")
         self.store.clear_channels(guild_id)
-        for channel_id in dict.fromkeys(str(value) for value in body.get("discord_forward_channel_ids", [])):
+        if channel_id:
             self.store.add_channel(guild_id, channel_id)
-        self.store.set_setting(guild_id, "discord_relay_channel_id", body.get("discord_receive_channel_id") or None)
+        self.store.set_setting(guild_id, "discord_relay_channel_id", channel_id or None)
+        self.store.set_setting(guild_id, "discord_forward_enabled", bool(body.get("discord_forward_enabled", True)))
+        self.store.set_setting(guild_id, "discord_receive_enabled", bool(body.get("discord_receive_enabled", True)))
         self.store.set_setting(guild_id, "transport_announcements", bool(body.get("transport_announcements", True)))
         session_id = str(body.get("ssn_session_id") or "").strip()
         if session_id:

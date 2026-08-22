@@ -359,7 +359,12 @@ class StreamBridge(commands.Bot):
         if not key:
             return False
         config = self.store.get(str(guild_id))
-        if config and config.discord_relay_channel_id and self.store.claim_delivery(str(guild_id), key, "discord"):
+        if (
+            config
+            and config.discord_relay_channel_id
+            and self.store.get_setting(str(guild_id), "discord_receive_enabled", True)
+            and self.store.claim_delivery(str(guild_id), key, "discord")
+        ):
             await self.send_webhook(guild_id, int(config.discord_relay_channel_id), display_name, str(data.get("chatimg", "")), platform, message_text or content_image)
         return True
 
@@ -391,7 +396,11 @@ class StreamBridge(commands.Bot):
             return
         guild_id = str(message.guild.id)
         config = self.store.get(guild_id)
-        if not config or str(message.channel.id) not in config.channel_ids:
+        if (
+            not config
+            or not self.store.get_setting(guild_id, "discord_forward_enabled", True)
+            or str(message.channel.id) not in config.channel_ids
+        ):
             return
         payload = to_ssn_message(message)
         if not (payload["chatmessage"] or payload["contentimg"]):
@@ -462,48 +471,49 @@ async def ssn_disconnect(i: discord.Interaction) -> None:
 bot.tree.add_command(ssn_group)
 
 
-forward_group = app_commands.Group(name="forward", description="Choose Discord channels whose messages are sent to streaming chats", default_permissions=discord.Permissions(administrator=True))
+forward_group = app_commands.Group(name="forward", description="Configure forwarding messages from Discord", default_permissions=discord.Permissions(administrator=True))
 
 
-@forward_group.command(name="add", description="Add a Discord text channel or voice-channel chat as a relay source")
-@app_commands.describe(channel="The text channel or voice-channel side chat to forward from")
-async def channel_add(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
+@forward_group.command(name="set", description="Choose the shared Discord relay channel and enable forwarding from it")
+@app_commands.describe(channel="The shared text channel or voice-channel side chat")
+async def forward_set(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
-    changed = bot.store.add_channel(str(i.guild_id), str(channel.id))
-    await i.response.send_message("Messages in that Discord channel will now be forwarded to the active relay (SSN or direct platforms)." if changed else "That channel is already enabled for forwarding.", ephemeral=True)
+    guild_id = str(i.guild_id)
+    bot.store.clear_channels(guild_id)
+    bot.store.add_channel(guild_id, str(channel.id))
+    bot.store.set_setting(guild_id, "discord_relay_channel_id", str(channel.id))
+    bot.store.set_setting(guild_id, "discord_forward_enabled", True)
+    await i.response.send_message(f"Messages from {channel.mention} will now be forwarded.", ephemeral=True)
 
 
-@forward_group.command(name="remove", description="Stop forwarding messages from one Discord channel")
-@app_commands.describe(channel="The configured text channel or voice-channel side chat to remove")
-async def channel_remove(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
+@forward_group.command(name="clear", description="Disable forwarding messages from Discord")
+async def forward_clear(i: discord.Interaction) -> None:
     assert i.guild_id
-    changed = bot.store.remove_channel(str(i.guild_id), str(channel.id))
-    await i.response.send_message("That Discord channel will no longer be forwarded." if changed else "That channel was not being forwarded.", ephemeral=True)
-
-
-@forward_group.command(name="clear", description="Remove every configured Discord forwarding channel")
-async def channel_clear(i: discord.Interaction) -> None:
-    assert i.guild_id
-    await i.response.send_message(f"Stopped forwarding {bot.store.clear_channels(str(i.guild_id))} Discord channel(s).", ephemeral=True)
+    bot.store.set_setting(str(i.guild_id), "discord_forward_enabled", False)
+    await i.response.send_message("Forwarding messages from Discord is disabled.", ephemeral=True)
 
 
 bot.tree.add_command(forward_group)
 receive_group = app_commands.Group(name="receive", description="Choose where Discord receives messages from streaming platforms", default_permissions=discord.Permissions(administrator=True))
 
 
-@receive_group.command(name="set", description="Choose the Discord channel that receives streaming chat messages")
-@app_commands.describe(channel="The text channel or voice-channel side chat that should receive messages")
+@receive_group.command(name="set", description="Choose the shared Discord relay channel and enable receiving messages")
+@app_commands.describe(channel="The shared text channel or voice-channel side chat")
 async def receive_set(i: discord.Interaction, channel: discord.TextChannel | discord.VoiceChannel) -> None:
     assert i.guild_id
-    bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", str(channel.id))
-    await i.response.send_message(f"SSN platform messages will now be mirrored to {channel.mention}.", ephemeral=True)
+    guild_id = str(i.guild_id)
+    bot.store.clear_channels(guild_id)
+    bot.store.add_channel(guild_id, str(channel.id))
+    bot.store.set_setting(guild_id, "discord_relay_channel_id", str(channel.id))
+    bot.store.set_setting(guild_id, "discord_receive_enabled", True)
+    await i.response.send_message(f"Streaming messages will now be forwarded to {channel.mention}.", ephemeral=True)
 
 
 @receive_group.command(name="clear", description="Stop sending streaming chat messages into Discord")
 async def receive_clear(i: discord.Interaction) -> None:
     assert i.guild_id
-    bot.store.set_setting(str(i.guild_id), "discord_relay_channel_id", None)
-    await i.response.send_message("SSN-to-Discord mirroring disabled.", ephemeral=True)
+    bot.store.set_setting(str(i.guild_id), "discord_receive_enabled", False)
+    await i.response.send_message("Forwarding messages to Discord is disabled.", ephemeral=True)
 
 
 bot.tree.add_command(receive_group)
@@ -551,8 +561,10 @@ async def status(i: discord.Interaction) -> None:
     assert i.guild_id
     c = bot.store.get(str(i.guild_id))
     session = c.session_id[:3] + "••••••" if c and c.session_id else "not set"
-    channels = ", ".join(f"<#{x}>" for x in c.channel_ids) if c else "none"
-    mirror = f"<#{c.discord_relay_channel_id}>" if c and c.discord_relay_channel_id else "off"
+    channel_id = c.channel_ids[0] if c and c.channel_ids else c.discord_relay_channel_id if c else None
+    channel = f"<#{channel_id}>" if channel_id else "none"
+    channels = channel if bot.store.get_setting(str(i.guild_id), "discord_forward_enabled", True) else "off"
+    mirror = channel if bot.store.get_setting(str(i.guild_id), "discord_receive_enabled", True) else "off"
     ssn_state = "connected" if i.guild_id in bot.ssn_clients and bot.ssn_clients[i.guild_id].connected else "disconnected"
     ssn_targets = ", ".join(c.relay_targets) if c and c.relay_targets else "none"
     direct_platforms = []
