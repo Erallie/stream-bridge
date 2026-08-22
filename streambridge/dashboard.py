@@ -167,6 +167,11 @@ class DashboardAPI:
             await self.changed(workspace_id)
             workspaces = self.store.workspaces(user_id)
         for workspace in workspaces:
+            workspace["connections"] = [
+                connection
+                for connection in workspace["connections"]
+                if connection["provider"] in self.connection_providers
+            ]
             guild_id = str(workspace.get("discord_guild_id") or "")
             config = self.store.get(guild_id) if guild_id else None
             workspace["discord_channel_id"] = (
