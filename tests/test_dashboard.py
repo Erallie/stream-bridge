@@ -74,6 +74,7 @@ def test_dashboard_applies_complete_discord_configuration(tmp_path) -> None:
     dashboard.apply_discord_configuration({
         "discord_guild_id": "123",
         "discord_channel_id": "11",
+        "discord_enabled": True,
         "discord_forward_enabled": False,
         "discord_receive_enabled": True,
         "transport_announcements": False,
@@ -87,5 +88,17 @@ def test_dashboard_applies_complete_discord_configuration(tmp_path) -> None:
     assert config.session_id == "session-id"
     assert config.relay_targets == ("twitch", "tiktok", "future-platform")
     assert store.get_setting("123", "transport_announcements") is False
+    assert store.get_setting("123", "discord_enabled") is True
     assert store.get_setting("123", "discord_forward_enabled") is False
     assert store.get_setting("123", "discord_receive_enabled") is True
+
+    dashboard.apply_discord_configuration({
+        "discord_guild_id": "123",
+        "discord_channel_id": "11",
+        "discord_enabled": False,
+        "discord_forward_enabled": False,
+        "discord_receive_enabled": True,
+        "ssn_targets": [],
+    })
+    assert store.get("123").channel_ids == ("11",)
+    assert store.get_setting("123", "discord_enabled") is False

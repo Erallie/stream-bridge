@@ -166,6 +166,9 @@ class DashboardAPI:
                 if config and config.discord_relay_channel_id
                 else config.channel_ids[0] if config and config.channel_ids else None
             )
+            workspace["discord_enabled"] = bool(
+                self.store.get_setting(guild_id, "discord_enabled", True)
+            ) if guild_id else False
             workspace["discord_forward_enabled"] = bool(
                 self.store.get_setting(guild_id, "discord_forward_enabled", True)
             ) if guild_id else True
@@ -206,6 +209,11 @@ class DashboardAPI:
         ):
             raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid SSN platform selection"}), content_type="application/json")
         guild_id = str(body.get("discord_guild_id") or "")
+        if bool(body.get("discord_enabled", False)) and not guild_id:
+            raise web.HTTPBadRequest(
+                text=json.dumps({"error": "Select a Discord server or disable Discord"}),
+                content_type="application/json",
+            )
         if guild_id and guild_id not in {guild["id"] for guild in await self.available_discord_guilds(user_id)}:
             raise web.HTTPForbidden(
                 text=json.dumps({"error": "You must administer the selected Discord server"}),
@@ -216,7 +224,8 @@ class DashboardAPI:
             channel_ids = {channel["id"] for channel in channels}
             discord_channel_id = str(body.get("discord_channel_id") or "")
             if (
-                not discord_channel_id
+                bool(body.get("discord_enabled", False))
+                and not discord_channel_id
                 and (
                     bool(body.get("discord_forward_enabled", True))
                     or bool(body.get("discord_receive_enabled", True))
@@ -276,6 +285,7 @@ class DashboardAPI:
         if channel_id:
             self.store.add_channel(guild_id, channel_id)
         self.store.set_setting(guild_id, "discord_relay_channel_id", channel_id or None)
+        self.store.set_setting(guild_id, "discord_enabled", bool(body.get("discord_enabled", False)))
         self.store.set_setting(guild_id, "discord_forward_enabled", bool(body.get("discord_forward_enabled", True)))
         self.store.set_setting(guild_id, "discord_receive_enabled", bool(body.get("discord_receive_enabled", True)))
         self.store.set_setting(guild_id, "transport_announcements", bool(body.get("transport_announcements", True)))

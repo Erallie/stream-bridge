@@ -362,6 +362,7 @@ class StreamBridge(commands.Bot):
         if (
             config
             and config.discord_relay_channel_id
+            and self.store.get_setting(str(guild_id), "discord_enabled", True)
             and self.store.get_setting(str(guild_id), "discord_receive_enabled", True)
             and self.store.claim_delivery(str(guild_id), key, "discord")
         ):
@@ -398,6 +399,7 @@ class StreamBridge(commands.Bot):
         config = self.store.get(guild_id)
         if (
             not config
+            or not self.store.get_setting(guild_id, "discord_enabled", True)
             or not self.store.get_setting(guild_id, "discord_forward_enabled", True)
             or str(message.channel.id) not in config.channel_ids
         ):
@@ -482,6 +484,7 @@ async def forward_set(i: discord.Interaction, channel: discord.TextChannel | dis
     bot.store.clear_channels(guild_id)
     bot.store.add_channel(guild_id, str(channel.id))
     bot.store.set_setting(guild_id, "discord_relay_channel_id", str(channel.id))
+    bot.store.set_setting(guild_id, "discord_enabled", True)
     bot.store.set_setting(guild_id, "discord_forward_enabled", True)
     await i.response.send_message(f"Messages from {channel.mention} will now be forwarded.", ephemeral=True)
 
@@ -505,6 +508,7 @@ async def receive_set(i: discord.Interaction, channel: discord.TextChannel | dis
     bot.store.clear_channels(guild_id)
     bot.store.add_channel(guild_id, str(channel.id))
     bot.store.set_setting(guild_id, "discord_relay_channel_id", str(channel.id))
+    bot.store.set_setting(guild_id, "discord_enabled", True)
     bot.store.set_setting(guild_id, "discord_receive_enabled", True)
     await i.response.send_message(f"Streaming messages will now be forwarded to {channel.mention}.", ephemeral=True)
 
