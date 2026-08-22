@@ -50,7 +50,7 @@ def test_dashboard_identity_cannot_be_linked_to_two_users(tmp_path) -> None:
         raise AssertionError("Expected an account-link collision")
 
 
-def test_discord_server_can_only_belong_to_one_workspace(tmp_path) -> None:
+def test_dashboard_account_can_only_have_one_workspace(tmp_path) -> None:
     store = ConfigStore(str(tmp_path / "dashboard.sqlite"))
     user_id = store.create_dashboard_user()
     body = {
@@ -63,9 +63,9 @@ def test_discord_server_can_only_belong_to_one_workspace(tmp_path) -> None:
     try:
         store.save_workspace(user_id, body)
     except ValueError as error:
-        assert "already assigned" in str(error)
+        assert "already has a bridge" in str(error)
     else:
-        raise AssertionError("Expected a duplicate Discord server assignment to be rejected")
+        raise AssertionError("Expected a second bridge to be rejected")
 
 
 def test_dashboard_applies_complete_discord_configuration(tmp_path) -> None:

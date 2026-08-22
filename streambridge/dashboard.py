@@ -62,9 +62,7 @@ class DashboardAPI:
         app.router.add_get("/dashboard/api/discord/guilds/{guild_id}/channels", self.discord_channels)
         app.router.add_post("/dashboard/api/logout", self.logout)
         app.router.add_get("/dashboard/api/workspaces", self.list_workspaces)
-        app.router.add_post("/dashboard/api/workspaces", self.create_workspace)
         app.router.add_patch("/dashboard/api/workspaces/{workspace_id}", self.update_workspace)
-        app.router.add_delete("/dashboard/api/workspaces/{workspace_id}", self.remove_workspace)
         app.router.add_put("/dashboard/api/workspaces/{workspace_id}/connections/{provider}", self.update_connection)
         app.router.add_get("/dashboard/auth/{provider}", self.begin_oauth)
         app.router.add_get("/dashboard/auth/{provider}/callback", self.oauth_callback)
@@ -158,6 +156,16 @@ class DashboardAPI:
     async def list_workspaces(self, request: web.Request) -> web.Response:
         user_id = self.require_user(request)
         workspaces = self.store.workspaces(user_id)
+        if not workspaces:
+            workspace_id = self.store.save_workspace(user_id, {
+                "name": "My stream",
+                "ssn_targets": ["twitch", "youtube", "kick"],
+                "relay_template": "{name} ({platform}) said: {message}",
+                "transport_announcements": True,
+                "enabled": True,
+            })
+            await self.changed(workspace_id)
+            workspaces = self.store.workspaces(user_id)
         for workspace in workspaces:
             guild_id = str(workspace.get("discord_guild_id") or "")
             config = self.store.get(guild_id) if guild_id else None
@@ -295,18 +303,6 @@ class DashboardAPI:
         else:
             self.store.clear_session(guild_id)
 
-    async def create_workspace(self, request: web.Request) -> web.Response:
-        user_id = self.require_user(request)
-        body = await self.json_body(request)
-        await self.validate_workspace(user_id, body)
-        try:
-            workspace_id = self.store.save_workspace(user_id, body)
-        except ValueError as error:
-            raise web.HTTPConflict(text=json.dumps({"error": str(error)}), content_type="application/json")
-        self.apply_discord_configuration(body)
-        await self.changed(workspace_id)
-        return web.json_response({"id": workspace_id}, status=201)
-
     async def update_workspace(self, request: web.Request) -> web.Response:
         user_id = self.require_user(request)
         body = await self.json_body(request)
@@ -317,20 +313,6 @@ class DashboardAPI:
         except ValueError as error:
             raise web.HTTPConflict(text=json.dumps({"error": str(error)}), content_type="application/json")
         self.apply_discord_configuration(body)
-        await self.changed(workspace_id)
-        return web.json_response({"ok": True})
-
-    async def remove_workspace(self, request: web.Request) -> web.Response:
-        user_id = self.require_user(request)
-        workspace_id = request.match_info["workspace_id"]
-        workspace = next((item for item in self.store.workspaces(user_id) if item["id"] == workspace_id), None)
-        if not self.store.delete_workspace(user_id, workspace_id):
-            raise web.HTTPNotFound(text=json.dumps({"error": "Workspace not found"}), content_type="application/json")
-        guild_id = str(workspace.get("discord_guild_id") or "") if workspace else ""
-        if guild_id:
-            self.store.clear_channels(guild_id)
-            self.store.clear_session(guild_id)
-            self.store.set_setting(guild_id, "discord_relay_channel_id", None)
         await self.changed(workspace_id)
         return web.json_response({"ok": True})
 

@@ -362,6 +362,13 @@ class ConfigStore:
         return result
 
     def save_workspace(self, user_id: str, data: dict[str, Any], workspace_id: str | None = None) -> str:
+        if workspace_id is None:
+            existing_workspace = self.connection.execute(
+                "SELECT id FROM bridge_workspaces WHERE owner_user_id=? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if existing_workspace:
+                raise ValueError("This account already has a bridge")
         workspace_id = workspace_id or str(uuid.uuid4())
         existing = self.connection.execute("SELECT owner_user_id, created_at FROM bridge_workspaces WHERE id=?", (workspace_id,)).fetchone()
         if existing and existing["owner_user_id"] != user_id:
@@ -406,11 +413,6 @@ class ConfigStore:
             (int(enabled), now(), guild_id),
         )
         self.connection.commit()
-
-    def delete_workspace(self, user_id: str, workspace_id: str) -> bool:
-        result = self.connection.execute("DELETE FROM bridge_workspaces WHERE id=? AND owner_user_id=?", (workspace_id, user_id))
-        self.connection.commit()
-        return result.rowcount > 0
 
     def set_workspace_connection(self, user_id: str, workspace_id: str, provider: str,
                                  provider_user_id: str, enabled: bool, settings: dict[str, Any]) -> None:
