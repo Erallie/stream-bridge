@@ -366,6 +366,14 @@ class ConfigStore:
         existing = self.connection.execute("SELECT owner_user_id, created_at FROM bridge_workspaces WHERE id=?", (workspace_id,)).fetchone()
         if existing and existing["owner_user_id"] != user_id:
             raise PermissionError("Workspace does not belong to this account")
+        discord_guild_id = data.get("discord_guild_id") or None
+        if discord_guild_id:
+            conflict = self.connection.execute(
+                "SELECT id FROM bridge_workspaces WHERE discord_guild_id=? AND id<>?",
+                (str(discord_guild_id), workspace_id),
+            ).fetchone()
+            if conflict:
+                raise ValueError("That Discord server is already assigned to another bridge")
         stamp = now()
         created = str(existing["created_at"]) if existing else stamp
         targets = ",".join(dict.fromkeys(str(value).lower() for value in data.get("ssn_targets", []) if value))
@@ -376,7 +384,7 @@ class ConfigStore:
                ssn_targets=excluded.ssn_targets, relay_template=excluded.relay_template,
                transport_announcements=excluded.transport_announcements, enabled=excluded.enabled,
                updated_at=excluded.updated_at""",
-            (workspace_id, user_id, str(data.get("name", "My stream"))[:80], data.get("discord_guild_id") or None,
+            (workspace_id, user_id, str(data.get("name", "My stream"))[:80], discord_guild_id,
              data.get("ssn_session_id") or None, data.get("ssn_password") or None, targets,
              str(data.get("relay_template", "{name} ({platform}) said: {message}")),
              int(bool(data.get("transport_announcements", True))), int(bool(data.get("enabled", True))), created, stamp),

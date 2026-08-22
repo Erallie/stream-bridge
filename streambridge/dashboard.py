@@ -17,6 +17,7 @@ from cryptography.fernet import Fernet
 from streambridge.database import ConfigStore
 
 WorkspaceChanged = Callable[[str], Awaitable[None]]
+IdentityLinked = Callable[[str, dict[str, str]], Awaitable[None]]
 
 
 def iso_after(**kwargs: int) -> str:
@@ -35,9 +36,11 @@ class DashboardAPI:
     providers = ("discord", "google", "twitch", "kick")
     connection_providers = ("discord", "youtube", "twitch", "kick")
 
-    def __init__(self, store: ConfigStore, on_workspace_changed: WorkspaceChanged | None = None) -> None:
+    def __init__(self, store: ConfigStore, on_workspace_changed: WorkspaceChanged | None = None,
+                 on_identity_linked: IdentityLinked | None = None) -> None:
         self.store = store
         self.on_workspace_changed = on_workspace_changed
+        self.on_identity_linked = on_identity_linked
         self.site_url = os.getenv("DASHBOARD_SITE_URL", "http://localhost:5173").rstrip("/")
         self.public_url = os.getenv("DASHBOARD_API_PUBLIC_URL", "http://localhost:8765").rstrip("/")
         self.cookie_name = "streambridge_session"
@@ -49,6 +52,7 @@ class DashboardAPI:
         app.middlewares.append(self.cors_middleware)
         app.router.add_get("/dashboard/api/health", self.health)
         app.router.add_get("/dashboard/api/me", self.me)
+        app.router.add_get("/dashboard/api/discord/guilds", self.discord_guilds)
         app.router.add_post("/dashboard/api/logout", self.logout)
         app.router.add_get("/dashboard/api/workspaces", self.list_workspaces)
         app.router.add_post("/dashboard/api/workspaces", self.create_workspace)
@@ -147,8 +151,7 @@ class DashboardAPI:
             raise web.HTTPBadRequest(text=json.dumps({"error": "The request body must be an object"}), content_type="application/json")
         return body
 
-    @staticmethod
-    def validate_workspace(body: dict[str, Any]) -> None:
+    async def validate_workspace(self, user_id: str, body: dict[str, Any]) -> None:
         template = str(body.get("relay_template", ""))
         for placeholder in ("{name}", "{message}", "{platform}"):
             if placeholder not in template:
@@ -156,21 +159,64 @@ class DashboardAPI:
         targets = body.get("ssn_targets", [])
         if not isinstance(targets, list) or any(value not in {"twitch", "youtube", "kick", "discord"} for value in targets):
             raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid SSN platform selection"}), content_type="application/json")
+        guild_id = str(body.get("discord_guild_id") or "")
+        if guild_id and guild_id not in {guild["id"] for guild in await self.available_discord_guilds(user_id)}:
+            raise web.HTTPForbidden(
+                text=json.dumps({"error": "You must administer the selected Discord server"}),
+                content_type="application/json",
+            )
+
+    async def available_discord_guilds(self, user_id: str) -> list[dict[str, str]]:
+        identity = next(
+            (item for item in self.store.dashboard_identities(user_id, include_tokens=True) if item["provider"] == "discord"),
+            None,
+        )
+        if not identity:
+            return []
+        access_token = self.decrypt(str(identity["access_token"]))
+        if not access_token:
+            return []
+        session = await self.http()
+        async with session.get(
+            "https://discord.com/api/v10/users/@me/guilds",
+            headers={"Authorization": f"Bearer {access_token}"},
+        ) as response:
+            body = await response.json(content_type=None)
+            if response.status >= 400:
+                raise web.HTTPUnauthorized(
+                    text=json.dumps({"error": "Reconnect Discord to refresh server access"}),
+                    content_type="application/json",
+                )
+        administrator = 1 << 3
+        return [
+            {"id": str(guild["id"]), "name": str(guild.get("name", "Discord server"))}
+            for guild in body
+            if guild.get("owner") or int(guild.get("permissions", "0")) & administrator
+        ]
+
+    async def discord_guilds(self, request: web.Request) -> web.Response:
+        return web.json_response({"guilds": await self.available_discord_guilds(self.require_user(request))})
 
     async def create_workspace(self, request: web.Request) -> web.Response:
         user_id = self.require_user(request)
         body = await self.json_body(request)
-        self.validate_workspace(body)
-        workspace_id = self.store.save_workspace(user_id, body)
+        await self.validate_workspace(user_id, body)
+        try:
+            workspace_id = self.store.save_workspace(user_id, body)
+        except ValueError as error:
+            raise web.HTTPConflict(text=json.dumps({"error": str(error)}), content_type="application/json")
         await self.changed(workspace_id)
         return web.json_response({"id": workspace_id}, status=201)
 
     async def update_workspace(self, request: web.Request) -> web.Response:
         user_id = self.require_user(request)
         body = await self.json_body(request)
-        self.validate_workspace(body)
+        await self.validate_workspace(user_id, body)
         workspace_id = request.match_info["workspace_id"]
-        self.store.save_workspace(user_id, body, workspace_id)
+        try:
+            self.store.save_workspace(user_id, body, workspace_id)
+        except ValueError as error:
+            raise web.HTTPConflict(text=json.dumps({"error": str(error)}), content_type="application/json")
         await self.changed(workspace_id)
         return web.json_response({"ok": True})
 
@@ -245,6 +291,8 @@ class DashboardAPI:
         try:
             identity = await self.exchange_identity(provider, request.query.get("code", ""), str(pending["verifier"]))
             user_id = str(pending["user_id"] or self.store.dashboard_user_for_identity(provider, identity["provider_user_id"]) or self.store.create_dashboard_user())
+            if self.on_identity_linked:
+                await self.on_identity_linked(provider, identity)
             identity["access_token"] = self.encrypt(identity.get("access_token", ""))
             identity["refresh_token"] = self.encrypt(identity.get("refresh_token", ""))
             self.store.save_dashboard_identity(user_id, identity)

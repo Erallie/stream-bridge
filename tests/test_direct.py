@@ -14,7 +14,7 @@ class DirectAdapterTests(unittest.TestCase):
             received.append(payload)
 
         async def exercise() -> None:
-            adapter = TwitchAdapter("channel", handler)
+            adapter = TwitchAdapter("channel", handler, Mock(), "linked-account")
 
             async def avatar(user_id: str, login: str) -> str:
                 self.assertEqual((user_id, login), ("42", "alex"))

@@ -67,6 +67,8 @@ class CommandMetadataTests(unittest.TestCase):
 
         self.assertNotIn("template", names)
         self.assertIn("message", direct_names)
+        message = next(command for command in direct.commands if command.name == "message")
+        self.assertEqual(message.parameters, [])
 
     def test_ssn_commands_are_grouped_and_old_top_level_names_are_gone(self) -> None:
         commands = {command.name: command for command in bot.tree.get_commands()}
@@ -93,6 +95,12 @@ class CommandMetadataTests(unittest.TestCase):
         youtube = next(command for command in direct.commands if command.name == "youtube")
 
         self.assertEqual(youtube.parameters, [])
+
+    def test_direct_twitch_uses_dashboard_instead_of_requesting_a_channel(self) -> None:
+        direct = next(command for command in bot.tree.get_commands() if command.name == "direct")
+        twitch = next(command for command in direct.commands if command.name == "twitch")
+
+        self.assertEqual(twitch.parameters, [])
 
 
 if __name__ == "__main__":

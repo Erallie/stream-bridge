@@ -31,12 +31,12 @@ def youtube_error_reasons(body: Any) -> set[str]:
 
 
 class TwitchAdapter:
-    def __init__(self, channel: str, handler: Handler, oauth: OAuthToken | None = None, username: str = "") -> None:
+    def __init__(self, channel: str, handler: Handler, oauth: OAuthToken, username: str) -> None:
         self.channel = channel.lstrip("#").lower()
         self.handler = handler
         self.task: asyncio.Task[None] | None = None
         self.queue: asyncio.Queue[str] = asyncio.Queue(maxsize=200)
-        self.oauth = oauth or OAuthToken("TWITCH", "https://id.twitch.tv/oauth2/token")
+        self.oauth = oauth
         self.username = username.lower()
         self.client_id = os.getenv("TWITCH_CLIENT_ID", "")
         self.session: aiohttp.ClientSession | None = None
@@ -54,9 +54,9 @@ class TwitchAdapter:
         await self.queue.put(text[:500])
 
     async def run(self) -> None:
-        username = self.username or os.getenv("TWITCH_BOT_USERNAME", "").lower()
+        username = self.username
         if not self.oauth.configured or not username:
-            logging.error("Direct Twitch requires TWITCH_BOT_USERNAME and Twitch OAuth credentials")
+            logging.error("Direct Twitch requires a dashboard-linked Twitch account")
             return
         attempt = 0
         while True:
@@ -293,7 +293,7 @@ class DirectHub:
                 await handler(data)
             return received
 
-        if twitch_channel:
+        if twitch_channel and twitch_oauth:
             self.adapters["twitch"] = TwitchAdapter(twitch_channel, platform_handler("twitch"), twitch_oauth, twitch_username)
         if youtube_oauth:
             self.adapters["youtube"] = YouTubeAdapter(platform_handler("youtube"), youtube_oauth)

@@ -47,3 +47,21 @@ def test_dashboard_identity_cannot_be_linked_to_two_users(tmp_path) -> None:
         assert "already linked" in str(error)
     else:
         raise AssertionError("Expected an account-link collision")
+
+
+def test_discord_server_can_only_belong_to_one_workspace(tmp_path) -> None:
+    store = ConfigStore(str(tmp_path / "dashboard.sqlite"))
+    user_id = store.create_dashboard_user()
+    body = {
+        "name": "Server bridge",
+        "discord_guild_id": "123",
+        "ssn_targets": [],
+        "relay_template": "{name} ({platform}) said: {message}",
+    }
+    store.save_workspace(user_id, body)
+    try:
+        store.save_workspace(user_id, body)
+    except ValueError as error:
+        assert "already assigned" in str(error)
+    else:
+        raise AssertionError("Expected a duplicate Discord server assignment to be rejected")

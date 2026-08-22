@@ -16,7 +16,7 @@ from streambridge.database import ConfigStore, GuildConfig
 from streambridge.dashboard import DashboardAPI
 from streambridge.direct import DirectHub
 from streambridge.kick import KickGateway
-from streambridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message, validate_direct_relay_template
+from streambridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message
 from streambridge.oauth import OAuthToken
 from streambridge.relay import ReflectionTracker
 from streambridge.ssn import SsnClient
@@ -38,6 +38,10 @@ def webhook_username(display_name: str, platform: str) -> str:
     return combined[:80]
 
 
+def dashboard_url() -> str:
+    return f"{os.getenv('DASHBOARD_SITE_URL', 'https://streambridge.gozarproductions.com').rstrip('/')}/dashboard"
+
+
 def format_status(channels: str, session: str, ssn_state: str, ssn_targets: str, direct: str, template: str, mirror: str) -> str:
     return (
         f"**Discord channels forwarded:** {channels}\n"
@@ -57,22 +61,26 @@ class StreamBridge(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix=commands.when_mentioned, intents=intents, application_id=int(os.environ["DISCORD_CLIENT_ID"]))
         self.store = ConfigStore(os.getenv("DATABASE_PATH", "./data/bot.sqlite"))
-        self.youtube = YouTubeGateway(self.store, self.handle_youtube_authorized)
-        self.kick = KickGateway(self.store, self.handle_kick_event, self.handle_kick_authorized)
-        self.dashboard = DashboardAPI(self.store, self.reload_workspace)
-        self.web = WebGateway(self.kick, self.youtube, self.dashboard)
+        self.youtube = YouTubeGateway(self.store)
+        self.kick = KickGateway(self.store, self.handle_kick_event)
+        self.dashboard = DashboardAPI(self.store, self.reload_workspace, self.handle_dashboard_identity)
+        self.web = WebGateway(self.kick, self.dashboard)
         self.ssn_clients: dict[int | str, SsnClient] = {}
         self.direct_hubs: dict[int | str, DirectHub] = {}
+        self.workspace_runtime_keys: dict[str, int | str] = {}
         self.webhooks: dict[int, discord.Webhook] = {}
         self.ssn_reflections: dict[int, ReflectionTracker] = {}
         self.history_task: asyncio.Task[None] | None = None
         self.ssn_url = os.getenv("SSN_WEBSOCKET_URL", "wss://io.socialstream.ninja")
 
+    async def handle_dashboard_identity(self, provider: str, identity: dict[str, str]) -> None:
+        if provider == "kick":
+            await self.kick.ensure_chat_subscription(identity["access_token"])
+
     async def setup_hook(self) -> None:
-        self.youtube.load_accounts()
         await self.kick.start()
         await self.web.start()
-        await self.load_standalone_workspaces()
+        await self.load_workspaces()
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
             guild = discord.Object(id=int(guild_id))
@@ -81,11 +89,30 @@ class StreamBridge(commands.Bot):
         else:
             await self.tree.sync()
 
-    async def load_standalone_workspaces(self) -> None:
-        """Start SSN transports for dashboard workspaces that are not tied to a Discord server."""
+    async def load_workspaces(self) -> None:
+        """Start every dashboard-configured bridge, including Discord-backed bridges."""
         for workspace in self.store.workspaces():
-            if workspace["enabled"] and not workspace["discord_guild_id"]:
+            if workspace["enabled"]:
                 await self.start_workspace(workspace)
+
+    @staticmethod
+    def workspace_key(workspace: dict[str, Any]) -> int | str:
+        return int(workspace["discord_guild_id"]) if workspace["discord_guild_id"] else f"workspace:{workspace['id']}"
+
+    def workspace_for_guild(self, guild_id: int) -> dict[str, Any] | None:
+        return next(
+            (
+                workspace for workspace in self.store.workspaces()
+                if workspace["enabled"] and str(workspace["discord_guild_id"] or "") == str(guild_id)
+            ),
+            None,
+        )
+
+    def direct_template(self, guild_id: int) -> str:
+        workspace = self.workspace_for_guild(guild_id)
+        if workspace:
+            return str(workspace["relay_template"])
+        return str(self.store.get_setting(str(guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
 
     def workspace_identity(self, workspace: dict[str, Any], provider: str) -> dict[str, Any] | None:
         connection = next((item for item in workspace["connections"] if item["provider"] == provider and item["enabled"]), None)
@@ -96,7 +123,8 @@ class StreamBridge(commands.Bot):
         return next((item for item in identities if item["provider"] == identity_provider and item["provider_user_id"] == connection["provider_user_id"]), None)
 
     async def start_workspace(self, workspace: dict[str, Any]) -> None:
-        key = f"workspace:{workspace['id']}"
+        key = self.workspace_key(workspace)
+        self.workspace_runtime_keys[str(workspace["id"])] = key
         if workspace["ssn_session_id"]:
             self.get_workspace_ssn(workspace)
         youtube = self.workspace_identity(workspace, "youtube")
@@ -116,18 +144,23 @@ class StreamBridge(commands.Bot):
                 "TWITCH", "https://id.twitch.tv/oauth2/token",
                 refresh_token=self.dashboard.decrypt(str(twitch["refresh_token"])),
                 client_id=os.getenv("TWITCH_CLIENT_ID", ""), client_secret=os.getenv("TWITCH_CLIENT_SECRET", ""),
+                on_refresh=lambda token, user_id=str(twitch["provider_user_id"]):
+                    self.store.update_dashboard_refresh_token("twitch", user_id, self.dashboard.encrypt(token)),
             )
         if twitch_oauth or youtube:
             async def received(data: dict[str, Any]) -> None:
                 ssn = self.ssn_clients.get(key)
                 if not ssn or not ssn.connected:
-                    await self.handle_workspace_direct(workspace, data)
+                    if isinstance(key, int):
+                        await self.handle_direct(key, data)
+                    else:
+                        await self.handle_workspace_direct(workspace, data)
             hub = DirectHub(received, twitch_channel, self.youtube.token(key), twitch_oauth, twitch_username)
             self.direct_hubs[key] = hub
             hub.start()
 
     async def handle_workspace_direct(self, workspace: dict[str, Any], data: dict[str, Any]) -> None:
-        key = f"workspace:{workspace['id']}"
+        key = self.workspace_key(workspace)
         message = ssn_to_plain_text(str(data.get("plainText") or data.get("chatmessage") or ""))
         if not message:
             return
@@ -146,14 +179,20 @@ class StreamBridge(commands.Bot):
             await asyncio.gather(*tasks, return_exceptions=True)
 
     def get_workspace_ssn(self, workspace: dict[str, Any]) -> SsnClient:
-        key = f"workspace:{workspace['id']}"
+        key = self.workspace_key(workspace)
         if key not in self.ssn_clients:
             async def received(data: dict[str, Any]) -> None:
-                await self.handle_workspace_message(str(workspace["id"]), data)
+                if isinstance(key, int):
+                    await self.handle_ssn(key, data)
+                else:
+                    await self.handle_workspace_message(str(workspace["id"]), data)
+            async def status(connected: bool) -> None:
+                if isinstance(key, int):
+                    await self.transport_status(key, connected)
             logger = logging.LoggerAdapter(logging.getLogger("streambridge.ssn"), {"workspace_id": workspace["id"]})
             self.ssn_clients[key] = SsnClient(
                 self.ssn_url, str(workspace["ssn_session_id"]), tuple(workspace["ssn_targets"]),
-                logger, received,
+                logger, received, status if isinstance(key, int) else None,
             )
             self.ssn_clients[key].start()
         return self.ssn_clients[key]
@@ -170,15 +209,17 @@ class StreamBridge(commands.Bot):
         )
 
     async def reload_workspace(self, workspace_id: str) -> None:
-        key = f"workspace:{workspace_id}"
+        key = self.workspace_runtime_keys.pop(workspace_id, f"workspace:{workspace_id}")
         existing = self.ssn_clients.pop(key, None)
         if existing:
             await existing.close()
         direct = self.direct_hubs.pop(key, None)
         if direct:
             await direct.close()
+        self.youtube.unregister_account(key)
+        self.kick.unregister_account(key)
         workspace = next((item for item in self.store.workspaces() if item["id"] == workspace_id), None)
-        if workspace and workspace["enabled"] and not workspace["discord_guild_id"]:
+        if workspace and workspace["enabled"]:
             await self.start_workspace(workspace)
 
     async def on_ready(self) -> None:
@@ -187,9 +228,8 @@ class StreamBridge(commands.Bot):
             self.history_task = asyncio.create_task(self.maintain_history(), name="history-maintenance")
         for guild_id in self.store.guild_ids():
             config = self.store.get(guild_id)
-            if config and config.session_id:
+            if config and config.session_id and not self.workspace_for_guild(int(guild_id)):
                 self.get_ssn(int(guild_id), config)
-            self.get_direct(int(guild_id))
 
     async def maintain_history(self) -> None:
         try:
@@ -221,28 +261,6 @@ class StreamBridge(commands.Bot):
             self.ssn_clients[guild_id].start()
         return self.ssn_clients[guild_id]
 
-    def get_direct(self, guild_id: int) -> DirectHub:
-        if guild_id not in self.direct_hubs:
-            async def received(data: dict[str, Any]) -> None:
-                client = self.ssn_clients.get(guild_id)
-                if not client or not client.connected:
-                    await self.handle_direct(guild_id, data)
-            guild = str(guild_id)
-            hub = DirectHub(
-                received,
-                str(self.store.get_setting(guild, "direct_twitch_channel", "")),
-                self.youtube.token(guild_id),
-            )
-            self.direct_hubs[guild_id] = hub
-            hub.start()
-        return self.direct_hubs[guild_id]
-
-    async def reset_direct(self, guild_id: int) -> None:
-        hub = self.direct_hubs.pop(guild_id, None)
-        if hub:
-            await hub.close()
-        self.get_direct(guild_id)
-
     async def handle_kick_event(self, guild_id: int | str, data: dict[str, Any]) -> None:
         if isinstance(guild_id, str) and guild_id.startswith("workspace:"):
             workspace_id = guild_id.removeprefix("workspace:")
@@ -256,18 +274,12 @@ class StreamBridge(commands.Bot):
         if not client or not client.connected:
             await self.handle_direct(guild_id, data)
 
-    async def handle_kick_authorized(self, guild_id: int, username: str) -> None:
-        logging.info("Discord guild %s authorized Kick channel %s", guild_id, username)
-
-    async def handle_youtube_authorized(self, guild_id: int, title: str) -> None:
-        logging.info("Discord guild %s authorized YouTube channel %s", guild_id, title)
-        await self.reset_direct(guild_id)
-
     async def send_direct(self, guild_id: int, text: str, exclude: str = "") -> None:
-        tasks = [self.get_direct(guild_id).send(text, exclude)]
+        hub = self.direct_hubs.get(guild_id)
+        tasks = [hub.send(text, exclude)] if hub else []
         if exclude != "kick" and self.kick.connected(guild_id):
             tasks.append(self.kick.send(guild_id, text))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
         for result in results:
             if isinstance(result, Exception):
                 logging.error("Direct relay send failed: %s", result)
@@ -326,8 +338,7 @@ class StreamBridge(commands.Bot):
     async def handle_direct(self, guild_id: int, data: dict[str, Any]) -> None:
         accepted = await self.handle_ssn(guild_id, data)
         if accepted:
-            template = str(self.store.get_setting(str(guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
-            await self.send_direct(guild_id, to_relay_text(data, template), str(data.get("type", "")))
+            await self.send_direct(guild_id, to_relay_text(data, self.direct_template(guild_id)), str(data.get("type", "")))
 
     async def send_webhook(self, guild_id: int, channel_id: int, display_name: str, avatar_url: str, platform: str, content: str) -> None:
         guild = self.get_guild(guild_id)
@@ -369,8 +380,7 @@ class StreamBridge(commands.Bot):
                     self.ssn_reflections.setdefault(message.guild.id, ReflectionTracker()).add(target, relay_text)
                     await ssn.send_chat(target, relay_text)
         else:
-            template = str(self.store.get_setting(guild_id, "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
-            await self.send_direct(message.guild.id, to_relay_text(payload, template))
+            await self.send_direct(message.guild.id, to_relay_text(payload, self.direct_template(message.guild.id)))
 
     async def close(self) -> None:
         if self.history_task:
@@ -470,67 +480,42 @@ bot.tree.add_command(receive_group)
 direct_group = app_commands.Group(name="direct", description="Configure direct platform connections", default_permissions=discord.Permissions(administrator=True))
 
 
-@direct_group.command(name="twitch", description="Connect directly to a Twitch channel when SSN is unavailable")
-@app_commands.describe(channel="The Twitch channel name, with or without the leading #")
-async def direct_twitch(i: discord.Interaction, channel: str) -> None:
-    assert i.guild_id
-    bot.store.set_setting(str(i.guild_id), "direct_twitch_channel", channel.lstrip("#"))
-    await bot.reset_direct(i.guild_id)
-    await i.response.send_message("Direct Twitch channel saved.", ephemeral=True)
+async def send_dashboard_link(i: discord.Interaction, action: str) -> None:
+    await i.response.send_message(
+        f"[Open the StreamBridge dashboard]({dashboard_url()}) to {action}. "
+        "Sign in, select or create the bridge for this Discord server, and link the platform account there.",
+        ephemeral=True,
+    )
 
 
-@direct_group.command(name="youtube", description="Use the authorized YouTube channel's active livestream chat")
+@direct_group.command(name="twitch", description="Open the dashboard to configure this server's Twitch connection")
+async def direct_twitch(i: discord.Interaction) -> None:
+    await send_dashboard_link(i, "configure Twitch")
+
+
+@direct_group.command(name="youtube", description="Open the dashboard to configure this server's YouTube connection")
 async def direct_youtube(i: discord.Interaction) -> None:
-    assert i.guild_id
-    try:
-        url = bot.youtube.authorization_url(i.guild_id, bot.web.listener_ready)
-    except RuntimeError as error:
-        await i.response.send_message(str(error), ephemeral=True)
-        return
-    await i.response.send_message(f"[Authorize this server's YouTube channel]({url})\nThis private link expires in 10 minutes.", ephemeral=True)
+    await send_dashboard_link(i, "configure YouTube")
 
 
-@direct_group.command(name="kick", description="Privately authorize this server's broadcaster account with Kick")
+@direct_group.command(name="kick", description="Open the dashboard to configure this server's Kick connection")
 async def direct_kick(i: discord.Interaction) -> None:
-    assert i.guild_id
-    try:
-        url = bot.kick.authorization_url(i.guild_id, bot.web.listener_ready)
-    except RuntimeError as error:
-        await i.response.send_message(str(error), ephemeral=True)
-        return
-    await i.response.send_message(f"[Authorize this server's Kick channel]({url})\nThis private link expires in 10 minutes.", ephemeral=True)
+    await send_dashboard_link(i, "configure Kick")
 
 
 @direct_group.command(name="disable", description="Disable one direct streaming-platform connection")
 @app_commands.describe(platform="The direct connection to disable: twitch, youtube, or kick")
 async def direct_disable(i: discord.Interaction, platform: str) -> None:
-    assert i.guild_id
     platform = platform.casefold()
     if platform not in {"twitch", "youtube", "kick"}:
         await i.response.send_message("Platform must be twitch, youtube, or kick.", ephemeral=True)
         return
-    if platform == "kick":
-        await bot.kick.disable(i.guild_id)
-    elif platform == "youtube":
-        await bot.youtube.disable(i.guild_id)
-    else:
-        bot.store.set_setting(str(i.guild_id), "direct_twitch_channel", "")
-    await bot.reset_direct(i.guild_id)
-    await i.response.send_message(f"Direct {platform.title()} disabled.", ephemeral=True)
+    await send_dashboard_link(i, f"disable or change {platform.title()}")
 
 
-@direct_group.command(name="message", description="Set the message format used for direct relays when SSN is unavailable")
-@app_commands.describe(template="Format using {name}, {message}, and optionally {platform}; leave blank to reset")
-async def direct_message(i: discord.Interaction, template: str = "") -> None:
-    assert i.guild_id
-    try:
-        checked = validate_direct_relay_template(template)
-    except ValueError as error:
-        await i.response.send_message(str(error), ephemeral=True)
-        return
-    bot.store.set_setting(str(i.guild_id), "direct_relay_template", checked)
-    example = to_relay_text({"chatname": "Alex", "chatmessage": "Hello!", "type": "twitch"}, checked)
-    await i.response.send_message(f"Direct relay message saved. Example:\n{example}", ephemeral=True)
+@direct_group.command(name="message", description="Open the dashboard to configure the direct relay message format")
+async def direct_message(i: discord.Interaction) -> None:
+    await send_dashboard_link(i, "change the direct relay message template")
 
 
 bot.tree.add_command(direct_group)
@@ -556,14 +541,16 @@ async def status(i: discord.Interaction) -> None:
     direct_platforms = []
     for platform in bot.direct_platforms(i.guild_id):
         if platform == "twitch":
-            twitch_channel = str(bot.store.get_setting(str(i.guild_id), "direct_twitch_channel", ""))
-            direct_platforms.append(f"twitch ({twitch_channel})" if twitch_channel else "twitch")
+            hub = bot.direct_hubs.get(i.guild_id)
+            adapter = hub.adapters.get("twitch") if hub else None
+            channel = getattr(adapter, "channel", "")
+            direct_platforms.append(f"twitch ({channel})" if channel else "twitch")
         elif platform == "youtube":
             direct_platforms.append(f"youtube ({bot.youtube.username(i.guild_id)})")
         elif platform == "kick":
             direct_platforms.append(f"kick ({bot.kick.username(i.guild_id)})")
     direct = ", ".join(direct_platforms) or "none"
-    template = str(bot.store.get_setting(str(i.guild_id), "direct_relay_template", DEFAULT_DIRECT_RELAY_TEMPLATE))
+    template = bot.direct_template(i.guild_id)
     await i.response.send_message(format_status(channels, session, ssn_state, ssn_targets, direct, template, mirror), ephemeral=True)
 def main() -> None:
     missing = [x for x in ("DISCORD_TOKEN", "DISCORD_CLIENT_ID") if not os.getenv(x)]

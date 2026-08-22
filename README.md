@@ -145,7 +145,7 @@ A typical setup takes four steps:
 
 1. Choose one or more Discord channels that send messages to streaming platforms.
 2. Choose the Discord channel that receives streaming messages.
-3. Connect the desired streaming platforms.
+3. Open the StreamBridge dashboard, link your platform accounts once, and assign them to this server's bridge.
 4. Run `/status` to verify everything.
 
 For example:
@@ -153,7 +153,7 @@ For example:
 ```text
 /forward add channel:#stream-chat
 /receive set channel:#stream-chat
-/direct twitch channel:your_twitch_channel
+/direct twitch
 /status
 ```
 
@@ -161,7 +161,7 @@ You may use the same Discord channel for both `/forward add` and `/receive set`.
 
 ## Commands
 
-All configuration responses containing private information or authorization links are visible only to the administrator who ran the command.
+All configuration responses and dashboard links are visible only to the administrator who ran the command.
 
 ### `/forward add`
 
@@ -228,57 +228,41 @@ This does not disable platform connections or Discord-to-platform forwarding.
 
 ### `/direct twitch`
 
-Connects this server to a Twitch channel for direct relay.
+Opens the dashboard, where you can link Twitch and assign the account to this server's bridge.
 
 ```text
-/direct twitch channel:CHANNEL_NAME
+/direct twitch
 ```
 
-The channel may be entered with or without `#`.
-
-Examples:
-
-```text
-/direct twitch channel:erallie
-```
-
-```text
-/direct twitch channel:#erallie
-```
-
-StreamBridge joins the specified Twitch channel using its configured Twitch bot account.
+Twitch authorization is performed once on Twitch's website. The linked Twitch identity supplies the channel, posting identity, and renewable OAuth authorization.
 
 ### `/direct youtube`
 
-Begins authorization for a YouTube channel.
+Opens the dashboard, where you can link Google/YouTube and assign the account to this server's bridge.
 
 ```text
 /direct youtube
 ```
 
-StreamBridge responds privately with an authorization link that expires after ten minutes.
-
-Open the link and sign into the Google account that owns the YouTube channel you want to connect. StreamBridge automatically finds that channel’s active livestream chat when the channel is live.
+Sign into the Google account that owns the YouTube channel you want to connect. StreamBridge automatically finds that channel’s active livestream chat when the channel is live.
 
 You can authorize the channel before starting a stream. StreamBridge will wait for an active livestream chat to become available.
 
 ### `/direct kick`
 
-Begins authorization for a Kick broadcaster account.
+Opens the dashboard, where you can link Kick and assign the account to this server's bridge.
 
 ```text
 /direct kick
 ```
 
-StreamBridge responds privately with an authorization link that expires after ten minutes.
-
 Open the link while signed into the Kick account that owns the channel you want to connect.
 
-The authorized account is the broadcaster whose chat StreamBridge reads. Messages relayed into Kick are posted using StreamBridge’s Kick bot identity.
+The linked account is the broadcaster whose chat StreamBridge reads and the identity used to post relayed messages.
 
 ### `/direct disable`
 
-Disables one direct platform connection.
+Opens the dashboard so you can disable or change one direct platform connection.
 
 ```text
 /direct disable platform:PLATFORM
@@ -306,14 +290,14 @@ Examples:
 /direct disable platform:kick
 ```
 
-Disabling one platform does not affect the others.
+Disable the platform in the bridge's **Direct platform connections** section. Disabling one platform does not affect the others.
 
 ### `/direct message`
 
-Changes the message format used when StreamBridge relays messages through direct platform connections.
+Opens the dashboard so you can change the format used for direct relay messages.
 
 ```text
-/direct message template:TEMPLATE
+/direct message
 ```
 
 Available placeholders:
@@ -324,15 +308,7 @@ Available placeholders:
 {platform}
 ```
 
-The template must contain `{message}`.
-
-Example:
-
-```text
-/direct message template:[{platform}] {name}: {message}
-```
-
-To restore the default format, run `/direct message` without entering a template.
+The dashboard template must contain all three placeholders.
 
 The default format is:
 
@@ -460,7 +436,7 @@ The exact platforms available through SSN depend on the connected Social Stream 
 
 ## Web dashboard
 
-The optional StreamBridge dashboard lets people sign in with Discord, Google/YouTube, Twitch, or Kick; link those identities to one account; and manage Discord-backed or standalone bridge workspaces. A standalone workspace does not require StreamBridge to be installed in a Discord server. It can use direct Twitch, YouTube, and Kick connections, or an SSN session.
+The StreamBridge dashboard is the single authorization and direct-relay configuration surface. People sign in with Discord, Google/YouTube, Twitch, or Kick; link each identity once; and assign linked accounts to Discord-backed or standalone bridge workspaces. A standalone workspace does not require StreamBridge to be installed in a Discord server.
 
 The public Svelte site contains no OAuth secrets. Authentication callbacks, encrypted tokens, sessions, workspace settings, and relay processes remain in this Pi-hosted StreamBridge service. Expose the existing local listener through Cloudflare Tunnel and configure:
 
@@ -477,21 +453,15 @@ Register the following callbacks with their providers:
 - `/dashboard/auth/twitch/callback`
 - `/dashboard/auth/kick/callback`
 
-Prefix each path with `DASHBOARD_API_PUBLIC_URL`. Discord dashboard sign-in also needs `DISCORD_CLIENT_SECRET`; Google reuses the YouTube client; Twitch and Kick reuse their existing application credentials. `TOKEN_ENCRYPTION_KEY` is required before any dashboard account can be linked.
+Prefix each path with `DASHBOARD_API_PUBLIC_URL`. These are the only OAuth callbacks StreamBridge uses. Discord dashboard sign-in also needs `DISCORD_CLIENT_SECRET`; Google reuses the YouTube client; Twitch and Kick reuse their existing application credentials. `TOKEN_ENCRYPTION_KEY` is required before any dashboard account can be linked.
 
 ## Privacy and authorization
 
-YouTube and Kick authorization links are:
-
-- Shown privately to the administrator
-- Valid for a limited time
-- Associated with the Discord server where the command was used
-
-Authorizing one Discord server does not automatically connect the same platform account to another server.
+Each platform account is authorized once through the dashboard and may then be assigned to bridges owned by the same dashboard account. Discord-backed bridges can only select servers where the signed-in Discord user has the Administrator permission or is the server owner.
 
 Only authorize accounts you own or are permitted to manage.
 
-StreamBridge does not need your Google, YouTube, or Kick password. Authentication occurs on the platform’s own website.
+StreamBridge does not need your Discord, Google, YouTube, Twitch, or Kick password. Authentication occurs on each platform's own website.
 
 ## Troubleshooting
 
@@ -545,25 +515,9 @@ Verify:
 
 The authorized YouTube channel must have an active livestream with live chat enabled. StreamBridge automatically waits for and discovers the active chat.
 
-### The authorization link expired
+### The wrong platform account appears
 
-Run the relevant command again:
-
-```text
-/direct youtube
-```
-
-or:
-
-```text
-/direct kick
-```
-
-Each generated link expires after ten minutes.
-
-### The wrong YouTube or Kick account appears
-
-Sign out of that platform in your browser, open a private/incognito window, sign into the intended broadcaster account, and generate a new authorization link.
+Sign out of that platform in your browser, open a private/incognito window, sign into the intended broadcaster account, and link it again from the dashboard.
 
 ## Support
 
