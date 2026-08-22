@@ -13,9 +13,11 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from streambridge.database import ConfigStore, GuildConfig
+from streambridge.dashboard import DashboardAPI
 from streambridge.direct import DirectHub
 from streambridge.kick import KickGateway
 from streambridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message, validate_direct_relay_template
+from streambridge.oauth import OAuthToken
 from streambridge.relay import ReflectionTracker
 from streambridge.ssn import SsnClient
 from streambridge.youtube import YouTubeGateway
@@ -57,9 +59,10 @@ class StreamBridge(commands.Bot):
         self.store = ConfigStore(os.getenv("DATABASE_PATH", "./data/bot.sqlite"))
         self.youtube = YouTubeGateway(self.store, self.handle_youtube_authorized)
         self.kick = KickGateway(self.store, self.handle_kick_event, self.handle_kick_authorized)
-        self.web = WebGateway(self.kick, self.youtube)
-        self.ssn_clients: dict[int, SsnClient] = {}
-        self.direct_hubs: dict[int, DirectHub] = {}
+        self.dashboard = DashboardAPI(self.store, self.reload_workspace)
+        self.web = WebGateway(self.kick, self.youtube, self.dashboard)
+        self.ssn_clients: dict[int | str, SsnClient] = {}
+        self.direct_hubs: dict[int | str, DirectHub] = {}
         self.webhooks: dict[int, discord.Webhook] = {}
         self.ssn_reflections: dict[int, ReflectionTracker] = {}
         self.history_task: asyncio.Task[None] | None = None
@@ -69,6 +72,7 @@ class StreamBridge(commands.Bot):
         self.youtube.load_accounts()
         await self.kick.start()
         await self.web.start()
+        await self.load_standalone_workspaces()
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
             guild = discord.Object(id=int(guild_id))
@@ -76,6 +80,106 @@ class StreamBridge(commands.Bot):
             await self.tree.sync(guild=guild)
         else:
             await self.tree.sync()
+
+    async def load_standalone_workspaces(self) -> None:
+        """Start SSN transports for dashboard workspaces that are not tied to a Discord server."""
+        for workspace in self.store.workspaces():
+            if workspace["enabled"] and not workspace["discord_guild_id"]:
+                await self.start_workspace(workspace)
+
+    def workspace_identity(self, workspace: dict[str, Any], provider: str) -> dict[str, Any] | None:
+        connection = next((item for item in workspace["connections"] if item["provider"] == provider and item["enabled"]), None)
+        if not connection:
+            return None
+        identity_provider = "google" if provider == "youtube" else provider
+        identities = self.store.dashboard_identities(str(workspace["owner_user_id"]), include_tokens=True)
+        return next((item for item in identities if item["provider"] == identity_provider and item["provider_user_id"] == connection["provider_user_id"]), None)
+
+    async def start_workspace(self, workspace: dict[str, Any]) -> None:
+        key = f"workspace:{workspace['id']}"
+        if workspace["ssn_session_id"]:
+            self.get_workspace_ssn(workspace)
+        youtube = self.workspace_identity(workspace, "youtube")
+        kick = self.workspace_identity(workspace, "kick")
+        twitch = self.workspace_identity(workspace, "twitch")
+        if youtube:
+            self.youtube.register_account(key, str(youtube["provider_user_id"]), str(youtube["display_name"]), self.dashboard.decrypt(str(youtube["refresh_token"])))
+        if kick:
+            self.kick.register_account(key, str(kick["provider_user_id"]), str(kick["display_name"]), self.dashboard.decrypt(str(kick["refresh_token"])))
+        twitch_oauth = None
+        twitch_channel = ""
+        twitch_username = ""
+        if twitch:
+            twitch_channel = str(twitch["display_name"]).lstrip("#").lower()
+            twitch_username = twitch_channel
+            twitch_oauth = OAuthToken(
+                "TWITCH", "https://id.twitch.tv/oauth2/token",
+                refresh_token=self.dashboard.decrypt(str(twitch["refresh_token"])),
+                client_id=os.getenv("TWITCH_CLIENT_ID", ""), client_secret=os.getenv("TWITCH_CLIENT_SECRET", ""),
+            )
+        if twitch_oauth or youtube:
+            async def received(data: dict[str, Any]) -> None:
+                ssn = self.ssn_clients.get(key)
+                if not ssn or not ssn.connected:
+                    await self.handle_workspace_direct(workspace, data)
+            hub = DirectHub(received, twitch_channel, self.youtube.token(key), twitch_oauth, twitch_username)
+            self.direct_hubs[key] = hub
+            hub.start()
+
+    async def handle_workspace_direct(self, workspace: dict[str, Any], data: dict[str, Any]) -> None:
+        key = f"workspace:{workspace['id']}"
+        message = ssn_to_plain_text(str(data.get("plainText") or data.get("chatmessage") or ""))
+        if not message:
+            return
+        event = self.store.claim_event(key, str(data.get("type", "unknown")), str(data.get("id", "")),
+                                       str(data.get("userid") or data.get("chatname", "")), message,
+                                       data.get("timestamp", int(time.time())))
+        if not event:
+            return
+        relay_text = to_relay_text(data, str(workspace["relay_template"]))
+        source = str(data.get("type", ""))
+        hub = self.direct_hubs.get(key)
+        tasks: list[Any] = [hub.send(relay_text, source)] if hub else []
+        if source != "kick" and self.kick.connected(key):
+            tasks.append(self.kick.send(key, relay_text))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def get_workspace_ssn(self, workspace: dict[str, Any]) -> SsnClient:
+        key = f"workspace:{workspace['id']}"
+        if key not in self.ssn_clients:
+            async def received(data: dict[str, Any]) -> None:
+                await self.handle_workspace_message(str(workspace["id"]), data)
+            logger = logging.LoggerAdapter(logging.getLogger("streambridge.ssn"), {"workspace_id": workspace["id"]})
+            self.ssn_clients[key] = SsnClient(
+                self.ssn_url, str(workspace["ssn_session_id"]), tuple(workspace["ssn_targets"]),
+                logger, received,
+            )
+            self.ssn_clients[key].start()
+        return self.ssn_clients[key]
+
+    async def handle_workspace_message(self, workspace_id: str, data: dict[str, Any]) -> None:
+        """Deduplicate standalone SSN traffic; SSN itself performs configured platform relaying."""
+        text = ssn_to_plain_text(str(data.get("plainText") or data.get("chatmessage") or ""))
+        if data.get("reflection") or data.get("bot") or not text:
+            return
+        self.store.claim_event(
+            f"workspace:{workspace_id}", str(data.get("type", "unknown")), str(data.get("id", "")),
+            str(data.get("userid") or data.get("chatname", "")), text,
+            data.get("timestamp", int(time.time())),
+        )
+
+    async def reload_workspace(self, workspace_id: str) -> None:
+        key = f"workspace:{workspace_id}"
+        existing = self.ssn_clients.pop(key, None)
+        if existing:
+            await existing.close()
+        direct = self.direct_hubs.pop(key, None)
+        if direct:
+            await direct.close()
+        workspace = next((item for item in self.store.workspaces() if item["id"] == workspace_id), None)
+        if workspace and workspace["enabled"] and not workspace["discord_guild_id"]:
+            await self.start_workspace(workspace)
 
     async def on_ready(self) -> None:
         logging.info("StreamBridge ready as %s", self.user)
@@ -139,7 +243,15 @@ class StreamBridge(commands.Bot):
             await hub.close()
         self.get_direct(guild_id)
 
-    async def handle_kick_event(self, guild_id: int, data: dict[str, Any]) -> None:
+    async def handle_kick_event(self, guild_id: int | str, data: dict[str, Any]) -> None:
+        if isinstance(guild_id, str) and guild_id.startswith("workspace:"):
+            workspace_id = guild_id.removeprefix("workspace:")
+            workspace = next((item for item in self.store.workspaces() if item["id"] == workspace_id), None)
+            if workspace:
+                ssn = self.ssn_clients.get(guild_id)
+                if not ssn or not ssn.connected:
+                    await self.handle_workspace_direct(workspace, data)
+            return
         client = self.ssn_clients.get(guild_id)
         if not client or not client.connected:
             await self.handle_direct(guild_id, data)

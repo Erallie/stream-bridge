@@ -458,6 +458,27 @@ When StreamBridge detects an active SSN host, it can let SSN handle the platform
 
 The exact platforms available through SSN depend on the connected Social Stream Ninja setup.
 
+## Web dashboard
+
+The optional StreamBridge dashboard lets people sign in with Discord, Google/YouTube, Twitch, or Kick; link those identities to one account; and manage Discord-backed or standalone bridge workspaces. A standalone workspace does not require StreamBridge to be installed in a Discord server. It can use direct Twitch, YouTube, and Kick connections, or an SSN session.
+
+The public Svelte site contains no OAuth secrets. Authentication callbacks, encrypted tokens, sessions, workspace settings, and relay processes remain in this Pi-hosted StreamBridge service. Expose the existing local listener through Cloudflare Tunnel and configure:
+
+```ini
+DASHBOARD_SITE_URL=https://YOUR_SITE
+DASHBOARD_ALLOWED_ORIGINS=https://YOUR_SITE
+DASHBOARD_API_PUBLIC_URL=https://YOUR_STREAMBRIDGE_API_HOST
+```
+
+Register the following callbacks with their providers:
+
+- `/dashboard/auth/discord/callback`
+- `/dashboard/auth/google/callback`
+- `/dashboard/auth/twitch/callback`
+- `/dashboard/auth/kick/callback`
+
+Prefix each path with `DASHBOARD_API_PUBLIC_URL`. Discord dashboard sign-in also needs `DISCORD_CLIENT_SECRET`; Google reuses the YouTube client; Twitch and Kick reuse their existing application credentials. `TOKEN_ENCRYPTION_KEY` is required before any dashboard account can be linked.
+
 ## Privacy and authorization
 
 YouTube and Kick authorization links are:

@@ -8,14 +8,16 @@ from aiohttp import web
 
 from streambridge.kick import KickGateway
 from streambridge.youtube import YouTubeGateway
+from streambridge.dashboard import DashboardAPI
 
 
 class WebGateway:
     """Shared local HTTP receiver for platform webhooks and OAuth callbacks."""
 
-    def __init__(self, kick: KickGateway, youtube: YouTubeGateway) -> None:
+    def __init__(self, kick: KickGateway, youtube: YouTubeGateway, dashboard: DashboardAPI | None = None) -> None:
         self.kick = kick
         self.youtube = youtube
+        self.dashboard = dashboard
         self.runner: web.AppRunner | None = None
         self.start_task: asyncio.Task[None] | None = None
         self.listener_ready = False
@@ -25,6 +27,8 @@ class WebGateway:
         app.router.add_post(os.getenv("KICK_WEBHOOK_PATH", "/kick/webhook"), self.kick.webhook)
         app.router.add_get(os.getenv("KICK_OAUTH_CALLBACK_PATH", "/kick/oauth/callback"), self.kick.oauth_callback)
         app.router.add_get(os.getenv("YOUTUBE_OAUTH_CALLBACK_PATH", "/youtube/oauth/callback"), self.youtube.oauth_callback)
+        if self.dashboard:
+            self.dashboard.register(app)
         return app
 
     async def start(self) -> None:
@@ -60,3 +64,5 @@ class WebGateway:
             await asyncio.gather(self.start_task, return_exceptions=True)
         if self.runner:
             await self.runner.cleanup()
+        if self.dashboard:
+            await self.dashboard.close()

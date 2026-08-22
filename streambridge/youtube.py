@@ -82,10 +82,14 @@ class YouTubeGateway:
     def save_account(self, guild_id: int, channel_id: str, title: str, refresh_token: str) -> None:
         if not self.fernet:
             raise RuntimeError("Token encryption is not configured")
+        encrypted = self.fernet.encrypt(refresh_token.encode()).decode("ascii")
+        if isinstance(guild_id, str) and guild_id.startswith("workspace:"):
+            self.store.update_dashboard_refresh_token("google", channel_id, encrypted)
+            return
         self.store.set_setting(str(guild_id), "youtube_authorization", {
             "channel_id": channel_id,
             "title": title,
-            "refresh_token": self.fernet.encrypt(refresh_token.encode()).decode("ascii"),
+            "refresh_token": encrypted,
         })
 
     def authorization_url(self, guild_id: int, listener_ready: bool) -> str:

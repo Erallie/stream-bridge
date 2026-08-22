@@ -172,6 +172,9 @@ class KickGateway:
         if not self.fernet:
             raise RuntimeError("Kick token encryption is not configured")
         encrypted = self.fernet.encrypt(refresh_token.encode("utf-8")).decode("ascii")
+        if isinstance(guild_id, str) and guild_id.startswith("workspace:"):
+            self.store.update_dashboard_refresh_token("kick", user_id, encrypted)
+            return
         self.store.set_setting(str(guild_id), "kick_authorization", {
             "broadcaster_user_id": user_id,
             "username": username,

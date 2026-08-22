@@ -31,12 +31,13 @@ def youtube_error_reasons(body: Any) -> set[str]:
 
 
 class TwitchAdapter:
-    def __init__(self, channel: str, handler: Handler) -> None:
+    def __init__(self, channel: str, handler: Handler, oauth: OAuthToken | None = None, username: str = "") -> None:
         self.channel = channel.lstrip("#").lower()
         self.handler = handler
         self.task: asyncio.Task[None] | None = None
         self.queue: asyncio.Queue[str] = asyncio.Queue(maxsize=200)
-        self.oauth = OAuthToken("TWITCH", "https://id.twitch.tv/oauth2/token")
+        self.oauth = oauth or OAuthToken("TWITCH", "https://id.twitch.tv/oauth2/token")
+        self.username = username.lower()
         self.client_id = os.getenv("TWITCH_CLIENT_ID", "")
         self.session: aiohttp.ClientSession | None = None
         self.avatar_cache: dict[str, tuple[float, str]] = {}
@@ -53,7 +54,7 @@ class TwitchAdapter:
         await self.queue.put(text[:500])
 
     async def run(self) -> None:
-        username = os.getenv("TWITCH_BOT_USERNAME", "").lower()
+        username = self.username or os.getenv("TWITCH_BOT_USERNAME", "").lower()
         if not self.oauth.configured or not username:
             logging.error("Direct Twitch requires TWITCH_BOT_USERNAME and Twitch OAuth credentials")
             return
@@ -279,7 +280,8 @@ class YouTubeAdapter:
 
 
 class DirectHub:
-    def __init__(self, handler: Handler, twitch_channel: str = "", youtube_oauth: OAuthToken | None = None) -> None:
+    def __init__(self, handler: Handler, twitch_channel: str = "", youtube_oauth: OAuthToken | None = None,
+                 twitch_oauth: OAuthToken | None = None, twitch_username: str = "") -> None:
         self.adapters: dict[str, Any] = {}
         self.reflections = ReflectionTracker()
 
@@ -292,7 +294,7 @@ class DirectHub:
             return received
 
         if twitch_channel:
-            self.adapters["twitch"] = TwitchAdapter(twitch_channel, platform_handler("twitch"))
+            self.adapters["twitch"] = TwitchAdapter(twitch_channel, platform_handler("twitch"), twitch_oauth, twitch_username)
         if youtube_oauth:
             self.adapters["youtube"] = YouTubeAdapter(platform_handler("youtube"), youtube_oauth)
 

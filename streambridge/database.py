@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -73,6 +74,64 @@ class ConfigStore:
             );
             CREATE INDEX IF NOT EXISTS processed_events_created_at ON processed_events(created_at);
             CREATE INDEX IF NOT EXISTS deliveries_created_at ON deliveries(created_at);
+            CREATE TABLE IF NOT EXISTS dashboard_users(
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS dashboard_identities(
+                provider TEXT NOT NULL,
+                provider_user_id TEXT NOT NULL,
+                user_id TEXT NOT NULL REFERENCES dashboard_users(id) ON DELETE CASCADE,
+                display_name TEXT NOT NULL,
+                avatar_url TEXT NOT NULL DEFAULT '',
+                access_token TEXT NOT NULL DEFAULT '',
+                refresh_token TEXT NOT NULL DEFAULT '',
+                scopes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(provider, provider_user_id)
+            );
+            CREATE TABLE IF NOT EXISTS dashboard_sessions(
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES dashboard_users(id) ON DELETE CASCADE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS dashboard_oauth_states(
+                state TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                user_id TEXT,
+                verifier TEXT NOT NULL DEFAULT '',
+                return_to TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS bridge_workspaces(
+                id TEXT PRIMARY KEY,
+                owner_user_id TEXT NOT NULL REFERENCES dashboard_users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                discord_guild_id TEXT,
+                ssn_session_id TEXT,
+                ssn_password TEXT,
+                ssn_targets TEXT NOT NULL DEFAULT '',
+                relay_template TEXT NOT NULL DEFAULT '{name} ({platform}) said: {message}',
+                transport_announcements INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS workspace_connections(
+                workspace_id TEXT NOT NULL REFERENCES bridge_workspaces(id) ON DELETE CASCADE,
+                provider TEXT NOT NULL,
+                provider_user_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                settings TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY(workspace_id, provider)
+            );
+            CREATE INDEX IF NOT EXISTS dashboard_identities_user ON dashboard_identities(user_id);
+            CREATE INDEX IF NOT EXISTS dashboard_sessions_user ON dashboard_sessions(user_id);
+            CREATE INDEX IF NOT EXISTS bridge_workspaces_owner ON bridge_workspaces(owner_user_id);
         """)
         self.connection.commit()
 
@@ -197,3 +256,153 @@ class ConfigStore:
 
     def close(self) -> None:
         self.connection.close()
+
+    def dashboard_user_for_identity(self, provider: str, provider_user_id: str) -> str | None:
+        row = self.connection.execute(
+            "SELECT user_id FROM dashboard_identities WHERE provider=? AND provider_user_id=?",
+            (provider, provider_user_id),
+        ).fetchone()
+        return str(row[0]) if row else None
+
+    def create_dashboard_user(self) -> str:
+        user_id = str(uuid.uuid4())
+        stamp = now()
+        self.connection.execute("INSERT INTO dashboard_users VALUES(?, ?, ?)", (user_id, stamp, stamp))
+        self.connection.commit()
+        return user_id
+
+    def save_dashboard_identity(self, user_id: str, identity: dict[str, Any]) -> None:
+        provider = str(identity["provider"])
+        provider_user_id = str(identity["provider_user_id"])
+        existing = self.dashboard_user_for_identity(provider, provider_user_id)
+        if existing and existing != user_id:
+            raise ValueError("That account is already linked to another StreamBridge account")
+        stamp = now()
+        self.connection.execute(
+            """INSERT INTO dashboard_identities
+               (provider, provider_user_id, user_id, display_name, avatar_url, access_token,
+                refresh_token, scopes, created_at, updated_at)
+               VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(provider, provider_user_id) DO UPDATE SET
+                   display_name=excluded.display_name, avatar_url=excluded.avatar_url,
+                   access_token=excluded.access_token,
+                   refresh_token=CASE WHEN excluded.refresh_token='' THEN dashboard_identities.refresh_token ELSE excluded.refresh_token END,
+                   scopes=excluded.scopes, updated_at=excluded.updated_at""",
+            (provider, provider_user_id, user_id, str(identity.get("display_name", "")),
+             str(identity.get("avatar_url", "")), str(identity.get("access_token", "")),
+             str(identity.get("refresh_token", "")), str(identity.get("scopes", "")), stamp, stamp),
+        )
+        self.connection.execute("UPDATE dashboard_users SET updated_at=? WHERE id=?", (stamp, user_id))
+        self.connection.commit()
+
+    def dashboard_identities(self, user_id: str, include_tokens: bool = False) -> list[dict[str, Any]]:
+        columns = "*" if include_tokens else "provider, provider_user_id, display_name, avatar_url, scopes, updated_at"
+        return [dict(row) for row in self.connection.execute(
+            f"SELECT {columns} FROM dashboard_identities WHERE user_id=? ORDER BY provider", (user_id,)
+        )]
+
+    def update_dashboard_refresh_token(self, provider: str, provider_user_id: str, encrypted_token: str) -> None:
+        self.connection.execute(
+            "UPDATE dashboard_identities SET refresh_token=?, updated_at=? WHERE provider=? AND provider_user_id=?",
+            (encrypted_token, now(), provider, provider_user_id),
+        )
+        self.connection.commit()
+
+    def save_dashboard_session(self, token_hash: str, user_id: str, expires_at: str) -> None:
+        self.connection.execute("INSERT INTO dashboard_sessions VALUES(?, ?, ?, ?)", (token_hash, user_id, expires_at, now()))
+        self.connection.commit()
+
+    def dashboard_session_user(self, token_hash: str) -> str | None:
+        self.connection.execute("DELETE FROM dashboard_sessions WHERE expires_at < ?", (now(),))
+        row = self.connection.execute(
+            "SELECT user_id FROM dashboard_sessions WHERE token_hash=? AND expires_at>=?", (token_hash, now())
+        ).fetchone()
+        self.connection.commit()
+        return str(row[0]) if row else None
+
+    def delete_dashboard_session(self, token_hash: str) -> None:
+        self.connection.execute("DELETE FROM dashboard_sessions WHERE token_hash=?", (token_hash,))
+        self.connection.commit()
+
+    def save_oauth_state(self, state: str, provider: str, mode: str, user_id: str | None,
+                         verifier: str, return_to: str, expires_at: str) -> None:
+        self.connection.execute("INSERT INTO dashboard_oauth_states VALUES(?, ?, ?, ?, ?, ?, ?)",
+                                (state, provider, mode, user_id, verifier, return_to, expires_at))
+        self.connection.commit()
+
+    def pop_oauth_state(self, state: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT * FROM dashboard_oauth_states WHERE state=? AND expires_at>=?", (state, now())
+        ).fetchone()
+        self.connection.execute("DELETE FROM dashboard_oauth_states WHERE state=? OR expires_at<?", (state, now()))
+        self.connection.commit()
+        return dict(row) if row else None
+
+    def workspaces(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM bridge_workspaces"
+        parameters: tuple[Any, ...] = ()
+        if user_id:
+            query += " WHERE owner_user_id=?"
+            parameters = (user_id,)
+        query += " ORDER BY created_at"
+        result: list[dict[str, Any]] = []
+        for row in self.connection.execute(query, parameters):
+            item = dict(row)
+            item["ssn_targets"] = list(filter(None, str(item["ssn_targets"]).split(",")))
+            item["transport_announcements"] = bool(item["transport_announcements"])
+            item["enabled"] = bool(item["enabled"])
+            item["connections"] = [dict(connection) for connection in self.connection.execute(
+                "SELECT provider, provider_user_id, enabled, settings FROM workspace_connections WHERE workspace_id=?",
+                (item["id"],),
+            )]
+            for connection in item["connections"]:
+                connection["enabled"] = bool(connection["enabled"])
+                connection["settings"] = json.loads(connection["settings"])
+            result.append(item)
+        return result
+
+    def save_workspace(self, user_id: str, data: dict[str, Any], workspace_id: str | None = None) -> str:
+        workspace_id = workspace_id or str(uuid.uuid4())
+        existing = self.connection.execute("SELECT owner_user_id, created_at FROM bridge_workspaces WHERE id=?", (workspace_id,)).fetchone()
+        if existing and existing["owner_user_id"] != user_id:
+            raise PermissionError("Workspace does not belong to this account")
+        stamp = now()
+        created = str(existing["created_at"]) if existing else stamp
+        targets = ",".join(dict.fromkeys(str(value).lower() for value in data.get("ssn_targets", []) if value))
+        self.connection.execute(
+            """INSERT INTO bridge_workspaces VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET name=excluded.name, discord_guild_id=excluded.discord_guild_id,
+               ssn_session_id=excluded.ssn_session_id, ssn_password=excluded.ssn_password,
+               ssn_targets=excluded.ssn_targets, relay_template=excluded.relay_template,
+               transport_announcements=excluded.transport_announcements, enabled=excluded.enabled,
+               updated_at=excluded.updated_at""",
+            (workspace_id, user_id, str(data.get("name", "My stream"))[:80], data.get("discord_guild_id") or None,
+             data.get("ssn_session_id") or None, data.get("ssn_password") or None, targets,
+             str(data.get("relay_template", "{name} ({platform}) said: {message}")),
+             int(bool(data.get("transport_announcements", True))), int(bool(data.get("enabled", True))), created, stamp),
+        )
+        self.connection.commit()
+        return workspace_id
+
+    def delete_workspace(self, user_id: str, workspace_id: str) -> bool:
+        result = self.connection.execute("DELETE FROM bridge_workspaces WHERE id=? AND owner_user_id=?", (workspace_id, user_id))
+        self.connection.commit()
+        return result.rowcount > 0
+
+    def set_workspace_connection(self, user_id: str, workspace_id: str, provider: str,
+                                 provider_user_id: str, enabled: bool, settings: dict[str, Any]) -> None:
+        owned = self.connection.execute("SELECT 1 FROM bridge_workspaces WHERE id=? AND owner_user_id=?", (workspace_id, user_id)).fetchone()
+        identity_provider = "google" if provider == "youtube" else provider
+        linked = self.connection.execute(
+            "SELECT 1 FROM dashboard_identities WHERE user_id=? AND provider=? AND provider_user_id=?",
+            (user_id, identity_provider, provider_user_id),
+        ).fetchone()
+        if not owned or not linked:
+            raise PermissionError("Workspace or linked account is unavailable")
+        self.connection.execute(
+            """INSERT INTO workspace_connections VALUES(?, ?, ?, ?, ?)
+               ON CONFLICT(workspace_id, provider) DO UPDATE SET
+               provider_user_id=excluded.provider_user_id, enabled=excluded.enabled, settings=excluded.settings""",
+            (workspace_id, provider, provider_user_id, int(enabled), json.dumps(settings)),
+        )
+        self.connection.commit()
