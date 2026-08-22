@@ -67,6 +67,7 @@ class CommandMetadataTests(unittest.TestCase):
 
         self.assertNotIn("template", names)
         self.assertIn("message", direct_names)
+        self.assertEqual(direct_names, {"setup", "disable", "message"})
         message = next(command for command in direct.commands if command.name == "message")
         self.assertEqual(message.parameters, [])
 
@@ -84,23 +85,10 @@ class CommandMetadataTests(unittest.TestCase):
 
         self.assertEqual([parameter.name for parameter in connect.parameters], ["session_id", "relay_targets"])
 
-    def test_direct_kick_authorizes_without_requesting_an_account_id(self) -> None:
+    def test_direct_commands_only_open_the_dashboard(self) -> None:
         direct = next(command for command in bot.tree.get_commands() if command.name == "direct")
-        kick = next(command for command in direct.commands if command.name == "kick")
-
-        self.assertEqual(kick.parameters, [])
-
-    def test_direct_youtube_authorizes_without_requesting_a_live_chat_id(self) -> None:
-        direct = next(command for command in bot.tree.get_commands() if command.name == "direct")
-        youtube = next(command for command in direct.commands if command.name == "youtube")
-
-        self.assertEqual(youtube.parameters, [])
-
-    def test_direct_twitch_uses_dashboard_instead_of_requesting_a_channel(self) -> None:
-        direct = next(command for command in bot.tree.get_commands() if command.name == "direct")
-        twitch = next(command for command in direct.commands if command.name == "twitch")
-
-        self.assertEqual(twitch.parameters, [])
+        self.assertEqual({command.name for command in direct.commands}, {"setup", "disable", "message"})
+        self.assertTrue(all(command.parameters == [] for command in direct.commands))
 
 
 if __name__ == "__main__":

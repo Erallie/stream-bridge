@@ -63,7 +63,13 @@ class StreamBridge(commands.Bot):
         self.store = ConfigStore(os.getenv("DATABASE_PATH", "./data/bot.sqlite"))
         self.youtube = YouTubeGateway(self.store)
         self.kick = KickGateway(self.store, self.handle_kick_event)
-        self.dashboard = DashboardAPI(self.store, self.reload_workspace, self.handle_dashboard_identity)
+        self.dashboard = DashboardAPI(
+            self.store,
+            self.reload_workspace,
+            self.handle_dashboard_identity,
+            self.dashboard_discord_channels,
+            self.dashboard_runtime_status,
+        )
         self.web = WebGateway(self.kick, self.dashboard)
         self.ssn_clients: dict[int | str, SsnClient] = {}
         self.direct_hubs: dict[int | str, DirectHub] = {}
@@ -76,6 +82,28 @@ class StreamBridge(commands.Bot):
     async def handle_dashboard_identity(self, provider: str, identity: dict[str, str]) -> None:
         if provider == "kick":
             await self.kick.ensure_chat_subscription(identity["access_token"])
+
+    async def dashboard_discord_channels(self, guild_id: str) -> list[dict[str, str]]:
+        guild = self.get_guild(int(guild_id))
+        if not guild:
+            return []
+        channels: list[dict[str, str]] = []
+        for channel in guild.channels:
+            if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
+                channels.append({
+                    "id": str(channel.id),
+                    "name": channel.name,
+                    "type": "voice" if isinstance(channel, discord.VoiceChannel) else "text",
+                })
+        return sorted(channels, key=lambda item: (item["type"], item["name"].casefold()))
+
+    async def dashboard_runtime_status(self, guild_id: str) -> dict[str, Any]:
+        key = int(guild_id)
+        ssn = self.ssn_clients.get(key)
+        return {
+            "ssn": "connected" if ssn and ssn.connected else "disconnected",
+            "direct_platforms": self.direct_platforms(key),
+        }
 
     async def setup_hook(self) -> None:
         await self.kick.start()
@@ -411,7 +439,9 @@ ssn_group = app_commands.Group(
 )
 async def ssn_connect(i: discord.Interaction, session_id: str, relay_targets: str = "twitch,youtube,kick,tiktok") -> None:
     assert i.guild_id
-    bot.store.set_session(str(i.guild_id), session_id.strip(), parse_list(relay_targets))
+    targets = parse_list(relay_targets)
+    bot.store.set_session(str(i.guild_id), session_id.strip(), targets)
+    bot.store.update_workspace_ssn_for_guild(str(i.guild_id), session_id.strip(), targets)
     bot.store.remove_setting(str(i.guild_id), "ssn_password")
     await bot.reset_ssn(i.guild_id)
     config = bot.store.get(str(i.guild_id))
@@ -424,6 +454,7 @@ async def ssn_connect(i: discord.Interaction, session_id: str, relay_targets: st
 async def ssn_disconnect(i: discord.Interaction) -> None:
     assert i.guild_id
     bot.store.clear_session(str(i.guild_id))
+    bot.store.update_workspace_ssn_for_guild(str(i.guild_id), None, [])
     await bot.reset_ssn(i.guild_id)
     await i.response.send_message("SSN disconnected.", ephemeral=True)
 
@@ -488,29 +519,14 @@ async def send_dashboard_link(i: discord.Interaction, action: str) -> None:
     )
 
 
-@direct_group.command(name="twitch", description="Open the dashboard to configure this server's Twitch connection")
-async def direct_twitch(i: discord.Interaction) -> None:
-    await send_dashboard_link(i, "configure Twitch")
+@direct_group.command(name="setup", description="Open the dashboard to configure direct platform connections")
+async def direct_setup(i: discord.Interaction) -> None:
+    await send_dashboard_link(i, "configure direct platform connections")
 
 
-@direct_group.command(name="youtube", description="Open the dashboard to configure this server's YouTube connection")
-async def direct_youtube(i: discord.Interaction) -> None:
-    await send_dashboard_link(i, "configure YouTube")
-
-
-@direct_group.command(name="kick", description="Open the dashboard to configure this server's Kick connection")
-async def direct_kick(i: discord.Interaction) -> None:
-    await send_dashboard_link(i, "configure Kick")
-
-
-@direct_group.command(name="disable", description="Disable one direct streaming-platform connection")
-@app_commands.describe(platform="The direct connection to disable: twitch, youtube, or kick")
-async def direct_disable(i: discord.Interaction, platform: str) -> None:
-    platform = platform.casefold()
-    if platform not in {"twitch", "youtube", "kick"}:
-        await i.response.send_message("Platform must be twitch, youtube, or kick.", ephemeral=True)
-        return
-    await send_dashboard_link(i, f"disable or change {platform.title()}")
+@direct_group.command(name="disable", description="Open the dashboard to disable direct platform connections")
+async def direct_disable(i: discord.Interaction) -> None:
+    await send_dashboard_link(i, "disable or change direct platform connections")
 
 
 @direct_group.command(name="message", description="Open the dashboard to configure the direct relay message format")
@@ -527,6 +543,7 @@ bot.tree.add_command(direct_group)
 async def switch_messages(i: discord.Interaction, enabled: bool) -> None:
     assert i.guild_id
     bot.store.set_setting(str(i.guild_id), "transport_announcements", enabled)
+    bot.store.update_workspace_announcements_for_guild(str(i.guild_id), enabled)
     await i.response.send_message(f"Transport-switch messages: {enabled}.", ephemeral=True)
 @bot.tree.command(name="status", description="Show this server's StreamBridge connections and relay configuration")
 @admin

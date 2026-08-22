@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from streambridge.database import ConfigStore
+from streambridge.dashboard import DashboardAPI
 
 
 def test_dashboard_accounts_sessions_and_standalone_workspace(tmp_path) -> None:
@@ -65,3 +66,23 @@ def test_discord_server_can_only_belong_to_one_workspace(tmp_path) -> None:
         assert "already assigned" in str(error)
     else:
         raise AssertionError("Expected a duplicate Discord server assignment to be rejected")
+
+
+def test_dashboard_applies_complete_discord_configuration(tmp_path) -> None:
+    store = ConfigStore(str(tmp_path / "dashboard.sqlite"))
+    dashboard = DashboardAPI(store)
+    dashboard.apply_discord_configuration({
+        "discord_guild_id": "123",
+        "discord_forward_channel_ids": ["10", "11"],
+        "discord_receive_channel_id": "11",
+        "transport_announcements": False,
+        "ssn_session_id": "session-id",
+        "ssn_targets": ["twitch", "tiktok", "future-platform"],
+    })
+    config = store.get("123")
+    assert config is not None
+    assert config.channel_ids == ("10", "11")
+    assert config.discord_relay_channel_id == "11"
+    assert config.session_id == "session-id"
+    assert config.relay_targets == ("twitch", "tiktok", "future-platform")
+    assert store.get_setting("123", "transport_announcements") is False

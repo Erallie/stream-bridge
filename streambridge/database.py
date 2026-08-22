@@ -392,6 +392,21 @@ class ConfigStore:
         self.connection.commit()
         return workspace_id
 
+    def update_workspace_ssn_for_guild(self, guild_id: str, session_id: str | None,
+                                       targets: list[str] | tuple[str, ...]) -> None:
+        self.connection.execute(
+            "UPDATE bridge_workspaces SET ssn_session_id=?, ssn_targets=?, updated_at=? WHERE discord_guild_id=?",
+            (session_id, ",".join(targets), now(), guild_id),
+        )
+        self.connection.commit()
+
+    def update_workspace_announcements_for_guild(self, guild_id: str, enabled: bool) -> None:
+        self.connection.execute(
+            "UPDATE bridge_workspaces SET transport_announcements=?, updated_at=? WHERE discord_guild_id=?",
+            (int(enabled), now(), guild_id),
+        )
+        self.connection.commit()
+
     def delete_workspace(self, user_id: str, workspace_id: str) -> bool:
         result = self.connection.execute("DELETE FROM bridge_workspaces WHERE id=? AND owner_user_id=?", (workspace_id, user_id))
         self.connection.commit()

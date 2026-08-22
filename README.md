@@ -153,7 +153,7 @@ For example:
 ```text
 /forward add channel:#stream-chat
 /receive set channel:#stream-chat
-/direct twitch
+/direct setup
 /status
 ```
 
@@ -226,68 +226,22 @@ Stops sending streaming-platform messages into Discord.
 
 This does not disable platform connections or Discord-to-platform forwarding.
 
-### `/direct twitch`
+### `/direct setup`
 
-Opens the dashboard, where you can link Twitch and assign the account to this server's bridge.
-
-```text
-/direct twitch
-```
-
-Twitch authorization is performed once on Twitch's website. The linked Twitch identity supplies the channel, posting identity, and renewable OAuth authorization.
-
-### `/direct youtube`
-
-Opens the dashboard, where you can link Google/YouTube and assign the account to this server's bridge.
+Opens the dashboard, where you can link Twitch, Google/YouTube, or Kick and choose every direct connection for this server's bridge.
 
 ```text
-/direct youtube
+/direct setup
 ```
 
-Sign into the Google account that owns the YouTube channel you want to connect. StreamBridge automatically finds that channel’s active livestream chat when the channel is live.
-
-You can authorize the channel before starting a stream. StreamBridge will wait for an active livestream chat to become available.
-
-### `/direct kick`
-
-Opens the dashboard, where you can link Kick and assign the account to this server's bridge.
-
-```text
-/direct kick
-```
-
-Open the link while signed into the Kick account that owns the channel you want to connect.
-
-The linked account is the broadcaster whose chat StreamBridge reads and the identity used to post relayed messages.
+Each platform is authorized once on its own website. The linked identity supplies the channel, posting identity, and renewable OAuth authorization.
 
 ### `/direct disable`
 
-Opens the dashboard so you can disable or change one direct platform connection.
+Opens the dashboard so you can disable or change direct platform connections.
 
 ```text
-/direct disable platform:PLATFORM
-```
-
-Supported values are:
-
-```text
-twitch
-youtube
-kick
-```
-
-Examples:
-
-```text
-/direct disable platform:twitch
-```
-
-```text
-/direct disable platform:youtube
-```
-
-```text
-/direct disable platform:kick
+/direct disable
 ```
 
 Disable the platform in the bridge's **Direct platform connections** section. Disabling one platform does not affect the others.
@@ -436,7 +390,7 @@ The exact platforms available through SSN depend on the connected Social Stream 
 
 ## Web dashboard
 
-The StreamBridge dashboard is the single authorization and direct-relay configuration surface. People sign in with Discord, Google/YouTube, Twitch, or Kick; link each identity once; and assign linked accounts to Discord-backed or standalone bridge workspaces. A standalone workspace does not require StreamBridge to be installed in a Discord server.
+The StreamBridge dashboard is the full configuration surface. People can manage Discord forwarding and receiving channels, SSN sessions and arbitrary SSN targets, transport announcements, direct relay templates, linked direct accounts, and Discord-backed or standalone workspaces. Settings changed with Discord commands appear automatically in the open dashboard. A standalone workspace does not require StreamBridge to be installed in a Discord server.
 
 The public Svelte site contains no OAuth secrets. Authentication callbacks, encrypted tokens, sessions, workspace settings, and relay processes remain in this Pi-hosted StreamBridge service. Expose the existing local listener through Cloudflare Tunnel and configure:
 

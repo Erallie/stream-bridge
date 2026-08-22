@@ -18,6 +18,8 @@ from streambridge.database import ConfigStore
 
 WorkspaceChanged = Callable[[str], Awaitable[None]]
 IdentityLinked = Callable[[str, dict[str, str]], Awaitable[None]]
+DiscordChannels = Callable[[str], Awaitable[list[dict[str, str]]]]
+RuntimeStatus = Callable[[str], Awaitable[dict[str, Any]]]
 
 
 def iso_after(**kwargs: int) -> str:
@@ -34,13 +36,17 @@ class DashboardAPI:
     """Dashboard sessions, linked identities, OAuth, and workspace configuration."""
 
     providers = ("discord", "google", "twitch", "kick")
-    connection_providers = ("discord", "youtube", "twitch", "kick")
+    connection_providers = ("youtube", "twitch", "kick")
 
     def __init__(self, store: ConfigStore, on_workspace_changed: WorkspaceChanged | None = None,
-                 on_identity_linked: IdentityLinked | None = None) -> None:
+                 on_identity_linked: IdentityLinked | None = None,
+                 discord_channels: DiscordChannels | None = None,
+                 runtime_status: RuntimeStatus | None = None) -> None:
         self.store = store
         self.on_workspace_changed = on_workspace_changed
         self.on_identity_linked = on_identity_linked
+        self.discord_channels_provider = discord_channels
+        self.runtime_status_provider = runtime_status
         self.site_url = os.getenv("DASHBOARD_SITE_URL", "http://localhost:5173").rstrip("/")
         self.public_url = os.getenv("DASHBOARD_API_PUBLIC_URL", "http://localhost:8765").rstrip("/")
         self.cookie_name = "streambridge_session"
@@ -53,6 +59,7 @@ class DashboardAPI:
         app.router.add_get("/dashboard/api/health", self.health)
         app.router.add_get("/dashboard/api/me", self.me)
         app.router.add_get("/dashboard/api/discord/guilds", self.discord_guilds)
+        app.router.add_get("/dashboard/api/discord/guilds/{guild_id}/channels", self.discord_channels)
         app.router.add_post("/dashboard/api/logout", self.logout)
         app.router.add_get("/dashboard/api/workspaces", self.list_workspaces)
         app.router.add_post("/dashboard/api/workspaces", self.create_workspace)
@@ -140,7 +147,25 @@ class DashboardAPI:
         return response
 
     async def list_workspaces(self, request: web.Request) -> web.Response:
-        return web.json_response({"workspaces": self.store.workspaces(self.require_user(request))})
+        user_id = self.require_user(request)
+        workspaces = self.store.workspaces(user_id)
+        for workspace in workspaces:
+            guild_id = str(workspace.get("discord_guild_id") or "")
+            config = self.store.get(guild_id) if guild_id else None
+            workspace["discord_forward_channel_ids"] = list(config.channel_ids) if config else []
+            workspace["discord_receive_channel_id"] = config.discord_relay_channel_id if config else None
+            if config:
+                workspace["ssn_session_id"] = config.session_id
+                workspace["ssn_targets"] = list(config.relay_targets)
+                workspace["transport_announcements"] = bool(
+                    self.store.get_setting(guild_id, "transport_announcements", workspace["transport_announcements"])
+                )
+            workspace["runtime_status"] = (
+                await self.runtime_status_provider(guild_id)
+                if guild_id and self.runtime_status_provider
+                else {"ssn": "disconnected", "direct_platforms": []}
+            )
+        return web.json_response({"workspaces": workspaces})
 
     async def json_body(self, request: web.Request) -> dict[str, Any]:
         try:
@@ -157,7 +182,10 @@ class DashboardAPI:
             if placeholder not in template:
                 raise web.HTTPBadRequest(text=json.dumps({"error": f"Relay template must contain {placeholder}"}), content_type="application/json")
         targets = body.get("ssn_targets", [])
-        if not isinstance(targets, list) or any(value not in {"twitch", "youtube", "kick", "discord"} for value in targets):
+        if not isinstance(targets, list) or any(
+            not isinstance(value, str) or not value.strip() or len(value) > 40
+            for value in targets
+        ):
             raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid SSN platform selection"}), content_type="application/json")
         guild_id = str(body.get("discord_guild_id") or "")
         if guild_id and guild_id not in {guild["id"] for guild in await self.available_discord_guilds(user_id)}:
@@ -165,6 +193,15 @@ class DashboardAPI:
                 text=json.dumps({"error": "You must administer the selected Discord server"}),
                 content_type="application/json",
             )
+        if guild_id:
+            channels = await self.get_discord_channels(guild_id)
+            channel_ids = {channel["id"] for channel in channels}
+            forwarding = body.get("discord_forward_channel_ids", [])
+            receiving = str(body.get("discord_receive_channel_id") or "")
+            if not isinstance(forwarding, list) or any(str(value) not in channel_ids for value in forwarding):
+                raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid Discord forwarding channel"}), content_type="application/json")
+            if receiving and receiving not in channel_ids:
+                raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid Discord receiving channel"}), content_type="application/json")
 
     async def available_discord_guilds(self, user_id: str) -> list[dict[str, str]]:
         identity = next(
@@ -197,6 +234,31 @@ class DashboardAPI:
     async def discord_guilds(self, request: web.Request) -> web.Response:
         return web.json_response({"guilds": await self.available_discord_guilds(self.require_user(request))})
 
+    async def get_discord_channels(self, guild_id: str) -> list[dict[str, str]]:
+        return await self.discord_channels_provider(guild_id) if self.discord_channels_provider else []
+
+    async def discord_channels(self, request: web.Request) -> web.Response:
+        user_id = self.require_user(request)
+        guild_id = request.match_info["guild_id"]
+        if guild_id not in {guild["id"] for guild in await self.available_discord_guilds(user_id)}:
+            raise web.HTTPForbidden(text=json.dumps({"error": "You do not administer that Discord server"}), content_type="application/json")
+        return web.json_response({"channels": await self.get_discord_channels(guild_id)})
+
+    def apply_discord_configuration(self, body: dict[str, Any]) -> None:
+        guild_id = str(body.get("discord_guild_id") or "")
+        if not guild_id:
+            return
+        self.store.clear_channels(guild_id)
+        for channel_id in dict.fromkeys(str(value) for value in body.get("discord_forward_channel_ids", [])):
+            self.store.add_channel(guild_id, channel_id)
+        self.store.set_setting(guild_id, "discord_relay_channel_id", body.get("discord_receive_channel_id") or None)
+        self.store.set_setting(guild_id, "transport_announcements", bool(body.get("transport_announcements", True)))
+        session_id = str(body.get("ssn_session_id") or "").strip()
+        if session_id:
+            self.store.set_session(guild_id, session_id, [str(value).strip().lower() for value in body.get("ssn_targets", [])])
+        else:
+            self.store.clear_session(guild_id)
+
     async def create_workspace(self, request: web.Request) -> web.Response:
         user_id = self.require_user(request)
         body = await self.json_body(request)
@@ -205,6 +267,7 @@ class DashboardAPI:
             workspace_id = self.store.save_workspace(user_id, body)
         except ValueError as error:
             raise web.HTTPConflict(text=json.dumps({"error": str(error)}), content_type="application/json")
+        self.apply_discord_configuration(body)
         await self.changed(workspace_id)
         return web.json_response({"id": workspace_id}, status=201)
 
@@ -217,14 +280,21 @@ class DashboardAPI:
             self.store.save_workspace(user_id, body, workspace_id)
         except ValueError as error:
             raise web.HTTPConflict(text=json.dumps({"error": str(error)}), content_type="application/json")
+        self.apply_discord_configuration(body)
         await self.changed(workspace_id)
         return web.json_response({"ok": True})
 
     async def remove_workspace(self, request: web.Request) -> web.Response:
         user_id = self.require_user(request)
         workspace_id = request.match_info["workspace_id"]
+        workspace = next((item for item in self.store.workspaces(user_id) if item["id"] == workspace_id), None)
         if not self.store.delete_workspace(user_id, workspace_id):
             raise web.HTTPNotFound(text=json.dumps({"error": "Workspace not found"}), content_type="application/json")
+        guild_id = str(workspace.get("discord_guild_id") or "") if workspace else ""
+        if guild_id:
+            self.store.clear_channels(guild_id)
+            self.store.clear_session(guild_id)
+            self.store.set_setting(guild_id, "discord_relay_channel_id", None)
         await self.changed(workspace_id)
         return web.json_response({"ok": True})
 
