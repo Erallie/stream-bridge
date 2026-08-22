@@ -72,7 +72,16 @@ class DashboardAPI:
 
     @web.middleware
     async def cors_middleware(self, request: web.Request, handler: Any) -> web.StreamResponse:
-        response = await handler(request)
+        try:
+            response = await handler(request)
+        except web.HTTPException as error:
+            response = error
+        except Exception:
+            logging.exception("Dashboard API request failed")
+            response = web.json_response(
+                {"error": "The StreamBridge API could not complete the request"},
+                status=500,
+            )
         origin = request.headers.get("Origin", "")
         allowed = {value.strip().rstrip("/") for value in os.getenv("DASHBOARD_ALLOWED_ORIGINS", self.site_url).split(",") if value.strip()}
         if origin.rstrip("/") in allowed:
