@@ -48,7 +48,7 @@ class DashboardTests(unittest.TestCase):
             {
                 "ssn_session_id": "session123",
                 "ssn_targets": ["twitch", "youtube"],
-                "relay_template": "{name} ({platform}) said: {message}",
+                "relay_template": "{name}: {message} (from {platform})",
                 "enabled": True,
             },
         )
@@ -162,7 +162,7 @@ class DashboardTests(unittest.TestCase):
             )
         workspace_id = self.store.save_workspace(
             user_id,
-            {"ssn_targets": [], "relay_template": "{name} ({platform}) said: {message}"},
+            {"ssn_targets": [], "relay_template": "{name}: {message} (from {platform})"},
         )
         self.store.set_workspace_connection(
             user_id, workspace_id, "twitch", "twitch-1", True, {}
@@ -211,7 +211,7 @@ class DashboardTests(unittest.TestCase):
             {
                 "discord_guild_id": "guild-1",
                 "ssn_targets": [],
-                "relay_template": "{name} ({platform}) said: {message}",
+                "relay_template": "{name}: {message} (from {platform})",
             },
         )
         self.store.add_channel("guild-1", "channel-1")
@@ -232,7 +232,7 @@ class DashboardTests(unittest.TestCase):
         body = {
             "discord_guild_id": "123",
             "ssn_targets": [],
-            "relay_template": "{name} ({platform}) said: {message}",
+            "relay_template": "{name}: {message} (from {platform})",
         }
         self.store.save_workspace(user_id, body)
         with self.assertRaisesRegex(ValueError, "already has a bridge"):
@@ -281,7 +281,7 @@ class DashboardTests(unittest.TestCase):
             user_id,
             {
                 "ssn_targets": [],
-                "relay_template": "{name} ({platform}) said: {message}",
+                "relay_template": "{name}: {message} (from {platform})",
             },
         )
         dashboard = DashboardAPI(self.store)
@@ -294,7 +294,7 @@ class DashboardTests(unittest.TestCase):
                 "discord_guild_id": None,
                 "discord_enabled": False,
                 "ssn_targets": ["tiktok"],
-                "relay_template": "{name} ({platform}) said: {message}",
+                "relay_template": "{name}: {message} (from {platform})",
                 "enabled": True,
                 "connections": [
                     {

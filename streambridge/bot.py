@@ -541,31 +541,64 @@ async def direct_setup(i: discord.Interaction) -> None:
     await send_dashboard_link(i, "configure direct platform connections")
 
 
-@direct_group.command(name="disable", description="Disable one direct platform connection without unlinking its account")
-@app_commands.describe(platform="The direct platform connection to disable")
-async def direct_disable(i: discord.Interaction, platform: Literal["twitch", "kick", "youtube"]) -> None:
+async def set_direct_connection_enabled(
+    i: discord.Interaction,
+    platform: Literal["twitch", "youtube", "kick"],
+    enabled: bool,
+) -> None:
     assert i.guild_id
     workspace = bot.workspace_for_guild(i.guild_id)
     connection = next(
-        (item for item in workspace["connections"] if item["provider"] == platform and item["enabled"]),
+        (item for item in workspace["connections"] if item["provider"] == platform),
         None,
     ) if workspace else None
     if not workspace or not connection:
-        await i.response.send_message(f"Direct {platform.title()} is not enabled.", ephemeral=True)
+        if enabled:
+            message = f"You must first connect your {platform.title()} account using `/direct setup`."
+        else:
+            message = f"Direct {platform.title()} is already disabled."
+        await i.response.send_message(message, ephemeral=True)
         return
-    bot.store.set_workspace_connection(
-        str(workspace["owner_user_id"]),
-        str(workspace["id"]),
-        platform,
-        str(connection["provider_user_id"]),
-        False,
-        dict(connection["settings"]),
-    )
+    if bool(connection["enabled"]) == enabled:
+        state = "enabled" if enabled else "disabled"
+        await i.response.send_message(f"Direct {platform.title()} is already {state}.", ephemeral=True)
+        return
+    if enabled:
+        try:
+            bot.store.set_workspace_connection(
+                str(workspace["owner_user_id"]),
+                str(workspace["id"]),
+                platform,
+                str(connection["provider_user_id"]),
+                True,
+                dict(connection["settings"]),
+            )
+        except PermissionError:
+            await i.response.send_message(
+                f"You must first connect your {platform.title()} account using `/direct setup`.",
+                ephemeral=True,
+            )
+            return
+    else:
+        bot.store.set_workspace_connection_enabled(str(workspace["id"]), platform, False)
     await bot.reload_workspace(str(workspace["id"]))
+    state = "enabled" if enabled else "disabled"
     await i.response.send_message(
-        f"Direct {platform.title()} disabled. Its linked account was retained.",
+        f"Direct {platform.title()} {state}. Its linked account was retained.",
         ephemeral=True,
     )
+
+
+@direct_group.command(name="enable", description="Enable a previously linked direct platform connection")
+@app_commands.describe(platform="The direct platform connection to enable")
+async def direct_enable(i: discord.Interaction, platform: Literal["twitch", "youtube", "kick"]) -> None:
+    await set_direct_connection_enabled(i, platform, True)
+
+
+@direct_group.command(name="disable", description="Disable one direct platform connection without unlinking its account")
+@app_commands.describe(platform="The direct platform connection to disable")
+async def direct_disable(i: discord.Interaction, platform: Literal["twitch", "youtube", "kick"]) -> None:
+    await set_direct_connection_enabled(i, platform, False)
 
 
 @direct_group.command(name="message", description="Set the message format used for direct relays when SSN is unavailable")

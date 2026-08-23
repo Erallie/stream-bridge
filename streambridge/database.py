@@ -112,7 +112,7 @@ class ConfigStore:
                 discord_guild_id TEXT,
                 ssn_session_id TEXT,
                 ssn_targets TEXT NOT NULL DEFAULT '',
-                relay_template TEXT NOT NULL DEFAULT '{name} ({platform}) said: {message}',
+                relay_template TEXT NOT NULL DEFAULT '{name}: {message} (from {platform})',
                 transport_announcements INTEGER NOT NULL DEFAULT 1,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -184,7 +184,7 @@ class ConfigStore:
                                discord_guild_id TEXT,
                                ssn_session_id TEXT,
                                ssn_targets TEXT NOT NULL DEFAULT '',
-                               relay_template TEXT NOT NULL DEFAULT '{name} ({platform}) said: {message}',
+                               relay_template TEXT NOT NULL DEFAULT '{name}: {message} (from {platform})',
                                transport_announcements INTEGER NOT NULL DEFAULT 1,
                                enabled INTEGER NOT NULL DEFAULT 1,
                                created_at TEXT NOT NULL,
@@ -599,7 +599,7 @@ class ConfigStore:
                updated_at=excluded.updated_at""",
             (workspace_id, user_id, discord_guild_id,
              data.get("ssn_session_id") or None, targets,
-             str(data.get("relay_template", "{name} ({platform}) said: {message}")),
+             str(data.get("relay_template", "{name}: {message} (from {platform})")),
              int(bool(data.get("transport_announcements", True))), int(bool(data.get("enabled", True))), created, stamp),
         )
         if commit:
@@ -648,3 +648,19 @@ class ConfigStore:
         )
         if commit:
             self.connection.commit()
+
+    def set_workspace_connection_enabled(
+        self,
+        workspace_id: str,
+        provider: str,
+        enabled: bool,
+        *,
+        commit: bool = True,
+    ) -> bool:
+        result = self.connection.execute(
+            "UPDATE workspace_connections SET enabled=? WHERE workspace_id=? AND provider=?",
+            (int(enabled), workspace_id, provider),
+        )
+        if commit:
+            self.connection.commit()
+        return result.rowcount > 0

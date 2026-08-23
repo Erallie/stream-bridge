@@ -11,7 +11,7 @@ from streambridge.messages import (
 
 class MessageTests(unittest.TestCase):
     def test_formats_relay_like_ssn(self) -> None:
-        self.assertEqual(to_relay_text({"chatname": "Alex", "chatmessage": "hello"}), "Alex said: hello")
+        self.assertEqual(to_relay_text({"chatname": "Alex", "chatmessage": "hello"}), "Alex: hello (from Unknown)")
 
     def test_formats_custom_direct_relay(self) -> None:
         payload = {"chatname": "Alex", "chatmessage": "hello", "type": "youtube"}
@@ -24,7 +24,7 @@ class MessageTests(unittest.TestCase):
             validate_direct_relay_template("{name}: {text} {message}")
 
     def test_empty_template_restores_default(self) -> None:
-        self.assertEqual(validate_direct_relay_template(""), "{name} said: {message}")
+        self.assertEqual(validate_direct_relay_template(""), "{name}: {message} (from {platform})")
 
     def test_discord_static_and_animated_emotes_become_ssn_images(self) -> None:
         rendered, has_emote = render_discord_content("Hi <:wave:123> <a:dance:456>!")
@@ -40,7 +40,7 @@ class MessageTests(unittest.TestCase):
 
     def test_direct_relay_uses_plain_text_instead_of_emote_html(self) -> None:
         payload = {"chatname": "Alex", "chatmessage": '<img src="emoji">', "plainText": ":wave:", "type": "discord"}
-        self.assertEqual(to_relay_text(payload), "Alex said: :wave:")
+        self.assertEqual(to_relay_text(payload), "Alex: :wave: (from Discord)")
 
     def test_discord_custom_emotes_become_bare_names_for_platform_chat(self) -> None:
         content = "<:erallieHeart:1529884213434777742> and <a:dance:456>"
@@ -55,7 +55,7 @@ class MessageTests(unittest.TestCase):
             "type": "discord",
         }
 
-        self.assertEqual(to_relay_text(payload), "Erika Gozar said: erallieHeart")
+        self.assertEqual(to_relay_text(payload), "Erika Gozar: erallieHeart (from Discord)")
 
     def test_text_plus_discord_emote_still_uses_the_relay_template(self) -> None:
         content = "Love this <:erallieHeart:1529884213434777742>"
@@ -65,7 +65,7 @@ class MessageTests(unittest.TestCase):
             "type": "discord",
         }
 
-        self.assertEqual(to_relay_text(payload), "Erika Gozar said: Love this erallieHeart")
+        self.assertEqual(to_relay_text(payload), "Erika Gozar: Love this erallieHeart (from Discord)")
 
     def test_ssn_html_entities_are_decoded_for_discord(self) -> None:
         self.assertEqual(ssn_to_plain_text("I&#039;m from Twitch &amp; Kick"), "I'm from Twitch & Kick")

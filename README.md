@@ -236,6 +236,16 @@ Opens the dashboard, where you can link Discord, Twitch, Google/YouTube, or Kick
 
 Each platform is authorized once on its own website. Linked identities supply the account and renewable OAuth authorization used by the bridge. Twitch and YouTube currently post through the authorized broadcaster account; Kick posts through StreamBridge's dedicated Kick bot identity.
 
+### `/direct enable`
+
+Immediately enables a previously linked direct platform connection.
+
+```text
+/direct enable platform:twitch
+```
+
+The `platform` option can be `twitch`, `youtube`, or `kick`. If the account is not connected, the command stops and tells you to connect it through `/direct setup` first.
+
 ### `/direct disable`
 
 Immediately disables one direct platform connection without unlinking its account.
@@ -267,7 +277,7 @@ The template must contain `{message}`. The `{name}` and `{platform}` placeholder
 The default format is:
 
 ```text
-{name} ({platform}) said: {message}
+{name}: {message} (from {platform})
 ```
 
 ### `/ssn connect`

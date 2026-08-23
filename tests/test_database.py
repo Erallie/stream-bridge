@@ -7,6 +7,22 @@ from streambridge.database import ConfigStore, GuildConfig
 
 
 class ConfigStoreTests(unittest.TestCase):
+    def test_direct_connection_can_be_disabled_without_a_linked_identity(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="stream-bridge-") as directory:
+            store = ConfigStore(str(Path(directory) / "bot.sqlite"))
+            user_id = store.create_dashboard_user()
+            workspace_id = store.save_workspace(user_id, {"ssn_targets": []})
+            store.connection.execute(
+                "INSERT INTO workspace_connections VALUES(?, ?, ?, ?, ?)",
+                (workspace_id, "twitch", "unlinked-account", 1, "{}"),
+            )
+            store.connection.commit()
+
+            self.assertTrue(store.set_workspace_connection_enabled(workspace_id, "twitch", False))
+            connection = store.workspaces(user_id)[0]["connections"][0]
+            self.assertFalse(connection["enabled"])
+            store.close()
+
     def test_transaction_rolls_back_every_related_setting(self) -> None:
         with tempfile.TemporaryDirectory(prefix="stream-bridge-") as directory:
             store = ConfigStore(str(Path(directory) / "bot.sqlite"))

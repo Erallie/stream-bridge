@@ -8,7 +8,7 @@ from typing import Any
 
 import discord
 
-DEFAULT_DIRECT_RELAY_TEMPLATE = "{name} said: {message}"
+DEFAULT_DIRECT_RELAY_TEMPLATE = "{name}: {message} (from {platform})"
 DIRECT_RELAY_FIELDS = frozenset({"name", "message", "platform"})
 DISCORD_TOKEN = re.compile(r"<(?:(a?):([A-Za-z0-9_]+):(\d+)|@!?([0-9]+)|@&([0-9]+)|#([0-9]+))>")
 

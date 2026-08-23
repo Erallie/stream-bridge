@@ -190,7 +190,7 @@ class DashboardAPI:
         if not workspaces:
             workspace_id = self.store.save_workspace(user_id, {
                 "ssn_targets": ["twitch", "youtube", "kick"],
-                "relay_template": "{name} ({platform}) said: {message}",
+                "relay_template": "{name}: {message} (from {platform})",
                 "transport_announcements": True,
                 "enabled": True,
             })
