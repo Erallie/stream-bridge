@@ -110,6 +110,9 @@ class TwitchAdapter:
         prefix, text = rest.split(" PRIVMSG ", 1)
         _, message = text.split(" :", 1)
         login = prefix.split("!", 1)[0].lstrip(":")
+        if login.casefold() == self.username.casefold():
+            logging.debug("Suppressed message echoed from StreamBridge's Twitch relay account")
+            return
         user_id = tags.get("user-id", "")
         avatar_url = await self.get_avatar(user_id, login)
         await self.handler({"type": "twitch", "id": tags.get("id", ""), "userid": user_id or login, "chatname": tags.get("display-name", login), "username": login, "chatmessage": message, "chatimg": avatar_url, "nameColor": tags.get("color", ""), "source": "direct"})
@@ -249,8 +252,12 @@ class YouTubeAdapter:
                 if not initial:
                     for item in body.get("items", []):
                         snippet, author = item.get("snippet", {}), item.get("authorDetails", {})
-                        if snippet.get("type") == "textMessageEvent":
-                            await self.handler({"type": "youtube", "id": item.get("id", ""), "userid": author.get("channelId", ""), "chatname": author.get("displayName", ""), "username": author.get("displayName", ""), "chatmessage": snippet.get("displayMessage", ""), "chatimg": author.get("profileImageUrl", ""), "source": "direct"})
+                        if snippet.get("type") != "textMessageEvent":
+                            continue
+                        if author.get("isChatOwner"):
+                            logging.debug("Suppressed message from StreamBridge's YouTube relay account")
+                            continue
+                        await self.handler({"type": "youtube", "id": item.get("id", ""), "userid": author.get("channelId", ""), "chatname": author.get("displayName", ""), "username": author.get("displayName", ""), "chatmessage": snippet.get("displayMessage", ""), "chatimg": author.get("profileImageUrl", ""), "source": "direct"})
                 await asyncio.sleep(max(1, int(body.get("pollingIntervalMillis", 5000)) / 1000))
             except asyncio.CancelledError:
                 return
