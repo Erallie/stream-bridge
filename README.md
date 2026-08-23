@@ -391,30 +391,30 @@ When StreamBridge detects an active SSN host, it can let SSN handle the platform
 
 The exact platforms available through SSN depend on the connected Social Stream Ninja setup.
 
-## Web dashboard and service architecture
+## Using the web dashboard
 
-The StreamBridge dashboard is the full configuration surface. People can manage the shared Discord relay channel and its two direction toggles, SSN sessions and arbitrary SSN targets, transport announcements, direct relay templates, linked accounts, and a Discord-backed or standalone bridge. Settings changed with Discord commands appear automatically in the open dashboard. A standalone bridge does not require StreamBridge to be installed in a Discord server.
+The [StreamBridge dashboard](https://streambridge.gozarproductions.com/dashboard) is the easiest way to set up and manage your bridge. You can sign in with Discord, Google, Twitch, or Kick, then link your other accounts so they all access the same StreamBridge configuration.
 
-Linked identities can be disconnected from their account cards. Disconnecting deletes StreamBridge's stored OAuth credentials and removes direct relay assignments that depend on that identity. Disconnecting Discord disables Discord relay while preserving the saved server and channel configuration. StreamBridge requires another linked sign-in method before the final identity can be disconnected, preventing accidental dashboard lockout. Disconnecting locally does not necessarily revoke the provider's authorization; revoke it separately through the provider when desired.
+From the dashboard, you can:
 
-Discord dashboard authorization refreshes automatically when its access token expires. StreamBridge securely saves rotated tokens and briefly caches the Discord server list to reduce API calls. A reconnect request should appear only when the Discord grant has expired, been revoked, or cannot be refreshed.
+- Connect or disconnect Twitch, YouTube, Kick, and Discord accounts.
+- Enable direct connections for the platforms you want to relay.
+- Connect Social Stream Ninja and choose any SSN-supported destination platforms.
+- Choose the Discord channel used for relay, if you want Discord integration.
+- Independently enable messages sent from Discord and messages received in Discord.
+- Customize the message format used for direct platform relay.
+- Choose whether Discord announces switches between SSN and direct relay.
+- Use StreamBridge without installing it in a Discord server.
 
-The public Svelte site contains no OAuth secrets. Authentication callbacks, encrypted tokens, sessions, workspace settings, and relay processes remain in this Pi-hosted StreamBridge service. Expose the existing local listener through Cloudflare Tunnel and configure:
+Press **Save** after making configuration changes. Changes made through Discord commands also appear in the dashboard.
 
-```ini
-DASHBOARD_SITE_URL=https://YOUR_SITE
-DASHBOARD_ALLOWED_ORIGINS=https://YOUR_SITE
-DASHBOARD_API_PUBLIC_URL=https://YOUR_STREAMBRIDGE_API_HOST
-```
+### Disconnecting an account
 
-Register the following callbacks with their providers:
+Use the **Disconnect** button beside a linked account to remove it from StreamBridge. Any direct connection that depends on that account will stop working until an account is linked again.
 
-- `/dashboard/auth/discord/callback`
-- `/dashboard/auth/google/callback`
-- `/dashboard/auth/twitch/callback`
-- `/dashboard/auth/kick/callback`
+You must keep at least one sign-in method connected so you do not lock yourself out of the dashboard. Disconnecting Discord disables Discord relay but retains the selected server, channel, and relay-direction settings for later use.
 
-Prefix each path with `DASHBOARD_API_PUBLIC_URL`. These are the only OAuth callbacks StreamBridge uses. Discord dashboard sign-in also needs `DISCORD_CLIENT_SECRET`; Google reuses the YouTube client; Twitch and Kick reuse their existing application credentials. `TOKEN_ENCRYPTION_KEY` is required before any dashboard account can be linked.
+Disconnecting an account from StreamBridge removes its saved authorization from StreamBridge, but it may not revoke permission at the platform itself. You can separately revoke StreamBridge through that platform's account settings if desired.
 
 ## Privacy and authorization
 
@@ -439,14 +439,6 @@ In the dashboard, verify:
 If Social Stream Ninja is configured but offline, allow StreamBridge time to detect the unavailable host and switch to direct mode.
 
 ### Discord-specific troubleshooting
-
-#### A command is not visible
-
-Make sure:
-
-- StreamBridge has been invited with the `applications.commands` authorization scope.
-- You have the Discord Administrator permission.
-- Discord has finished synchronizing the bot’s commands.
 
 #### StreamBridge cannot post in a channel
 
@@ -496,8 +488,6 @@ The authorized YouTube channel must have an active livestream with live chat ena
 Sign out of that platform in your browser, open a private/incognito window, sign into the intended broadcaster account, and link it again from the dashboard.
 
 ## Support
-
-Visit the [StreamBridge support page](https://streambridge.gozarproductions.com/support) for help and feedback options.
 
 Report reproducible bugs and request features through [StreamBridge GitHub Issues](https://github.com/Erallie/stream-bridge/issues).
 
