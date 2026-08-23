@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import time
-from typing import Any
+from typing import Any, Literal
 
 import discord
 from discord import app_commands
@@ -16,7 +16,7 @@ from streambridge.database import ConfigStore, GuildConfig
 from streambridge.dashboard import DashboardAPI
 from streambridge.direct import DirectHub
 from streambridge.kick import KickGateway
-from streambridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message
+from streambridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message, validate_direct_relay_template
 from streambridge.oauth import OAuthToken
 from streambridge.relay import ReflectionTracker
 from streambridge.ssn import SsnClient
@@ -541,14 +541,60 @@ async def direct_setup(i: discord.Interaction) -> None:
     await send_dashboard_link(i, "configure direct platform connections")
 
 
-@direct_group.command(name="disable", description="Open the dashboard to disable direct platform connections")
-async def direct_disable(i: discord.Interaction) -> None:
-    await send_dashboard_link(i, "disable or change direct platform connections")
+@direct_group.command(name="disable", description="Disable one direct platform connection without unlinking its account")
+@app_commands.describe(platform="The direct platform connection to disable")
+async def direct_disable(i: discord.Interaction, platform: Literal["twitch", "kick", "youtube"]) -> None:
+    assert i.guild_id
+    workspace = bot.workspace_for_guild(i.guild_id)
+    connection = next(
+        (item for item in workspace["connections"] if item["provider"] == platform and item["enabled"]),
+        None,
+    ) if workspace else None
+    if not workspace or not connection:
+        await i.response.send_message(f"Direct {platform.title()} is not enabled.", ephemeral=True)
+        return
+    bot.store.set_workspace_connection(
+        str(workspace["owner_user_id"]),
+        str(workspace["id"]),
+        platform,
+        str(connection["provider_user_id"]),
+        False,
+        dict(connection["settings"]),
+    )
+    await bot.reload_workspace(str(workspace["id"]))
+    await i.response.send_message(
+        f"Direct {platform.title()} disabled. Its linked account was retained.",
+        ephemeral=True,
+    )
 
 
-@direct_group.command(name="message", description="Open the dashboard to configure the direct relay message format")
-async def direct_message(i: discord.Interaction) -> None:
-    await send_dashboard_link(i, "change the direct relay message template")
+@direct_group.command(name="message", description="Set the message format used for direct relays when SSN is unavailable")
+@app_commands.describe(template="Use {name}, {message}, and {platform}; leave blank to restore the default")
+async def direct_message(i: discord.Interaction, template: str = "") -> None:
+    assert i.guild_id
+    try:
+        checked = validate_direct_relay_template(template)
+    except ValueError as error:
+        await i.response.send_message(str(error), ephemeral=True)
+        return
+    guild_id = str(i.guild_id)
+    bot.store.set_setting(guild_id, "direct_relay_template", checked)
+    workspace = bot.workspace_for_guild(i.guild_id)
+    if workspace:
+        workspace["relay_template"] = checked
+        bot.store.save_workspace(
+            str(workspace["owner_user_id"]),
+            workspace,
+            str(workspace["id"]),
+        )
+    example = to_relay_text(
+        {"chatname": "Alex", "chatmessage": "Hello!", "type": "twitch"},
+        checked,
+    )
+    await i.response.send_message(
+        f"Direct relay message saved. Example:\n{example}",
+        ephemeral=True,
+    )
 
 
 bot.tree.add_command(direct_group)

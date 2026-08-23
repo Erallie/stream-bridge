@@ -80,7 +80,7 @@ class CommandMetadataTests(unittest.TestCase):
         self.assertIn("message", direct_names)
         self.assertEqual(direct_names, {"setup", "disable", "message"})
         message = next(command for command in direct.commands if command.name == "message")
-        self.assertEqual(message.parameters, [])
+        self.assertEqual([parameter.name for parameter in message.parameters], ["template"])
 
     def test_ssn_commands_are_grouped_and_old_top_level_names_are_gone(self) -> None:
         commands = {command.name: command for command in bot.tree.get_commands()}
@@ -96,10 +96,16 @@ class CommandMetadataTests(unittest.TestCase):
 
         self.assertEqual([parameter.name for parameter in connect.parameters], ["session_id", "relay_targets"])
 
-    def test_direct_commands_only_open_the_dashboard(self) -> None:
+    def test_only_direct_setup_opens_the_dashboard(self) -> None:
         direct = next(command for command in bot.tree.get_commands() if command.name == "direct")
         self.assertEqual({command.name for command in direct.commands}, {"setup", "disable", "message"})
-        self.assertTrue(all(command.parameters == [] for command in direct.commands))
+        parameters = {
+            command.name: [parameter.name for parameter in command.parameters]
+            for command in direct.commands
+        }
+        self.assertEqual(parameters["setup"], [])
+        self.assertEqual(parameters["disable"], ["platform"])
+        self.assertEqual(parameters["message"], ["template"])
 
     def test_channel_commands_replace_forward_and_receive_groups(self) -> None:
         commands = {command.name: command for command in bot.tree.get_commands()}

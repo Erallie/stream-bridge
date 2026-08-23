@@ -238,20 +238,20 @@ Each platform is authorized once on its own website. Linked identities supply th
 
 ### `/direct disable`
 
-Opens the dashboard so you can disable or change direct platform connections.
+Immediately disables one direct platform connection without unlinking its account.
 
 ```text
-/direct disable
+/direct disable platform:twitch
 ```
 
-Disable the platform in the bridge's **Direct platform connections** section. Disabling one platform does not affect the others.
+The `platform` option can be `twitch`, `kick`, or `youtube`. Disabling one platform does not affect the others. You can enable it again through the dashboard without authorizing the account again.
 
 ### `/direct message`
 
-Opens the dashboard so you can change the format used for direct relay messages.
+Immediately changes the format used for direct relay messages.
 
 ```text
-/direct message
+/direct message template:{name}: {message} (from {platform})
 ```
 
 Available placeholders:
@@ -262,7 +262,7 @@ Available placeholders:
 {platform}
 ```
 
-The dashboard template must contain all three placeholders.
+The template must contain `{message}`. The `{name}` and `{platform}` placeholders are optional. Leave `template` blank to restore the default format.
 
 The default format is:
 
