@@ -12,8 +12,6 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import aiohttp
 import websockets
 
-from streambridge.messages import to_relay_text
-
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 StatusHandler = Callable[[bool], Awaitable[None]]
 
@@ -68,11 +66,6 @@ class SsnClient:
 
     async def send_chat(self, target: str, text: str) -> None:
         await self._enqueue({"action": "sendChat", "target": target, "value": text})
-
-    async def publish_discord(self, payload: dict[str, Any]) -> None:
-        await self.inject(payload)
-        for target in self.relay_targets:
-            await self.send_chat(target, to_relay_text(payload))
 
     async def _enqueue(self, command: dict[str, Any]) -> None:
         if self.queue.full():

@@ -158,7 +158,6 @@ class DashboardAPI:
         workspaces = self.store.workspaces(user_id)
         if not workspaces:
             workspace_id = self.store.save_workspace(user_id, {
-                "name": "My stream",
                 "ssn_targets": ["twitch", "youtube", "kick"],
                 "relay_template": "{name} ({platform}) said: {message}",
                 "transport_announcements": True,
@@ -289,35 +288,70 @@ class DashboardAPI:
             raise web.HTTPForbidden(text=json.dumps({"error": "You do not administer that Discord server"}), content_type="application/json")
         return web.json_response({"channels": await self.get_discord_channels(guild_id)})
 
-    def apply_discord_configuration(self, body: dict[str, Any]) -> None:
+    def apply_discord_configuration(self, body: dict[str, Any], *, commit: bool = True) -> None:
         guild_id = str(body.get("discord_guild_id") or "")
         if not guild_id:
             return
         channel_id = str(body.get("discord_channel_id") or "")
-        self.store.clear_channels(guild_id)
+        self.store.clear_channels(guild_id, commit=commit)
         if channel_id:
-            self.store.add_channel(guild_id, channel_id)
-        self.store.set_setting(guild_id, "discord_relay_channel_id", channel_id or None)
-        self.store.set_setting(guild_id, "discord_enabled", bool(body.get("discord_enabled", False)))
-        self.store.set_setting(guild_id, "discord_forward_enabled", bool(body.get("discord_forward_enabled", True)))
-        self.store.set_setting(guild_id, "discord_receive_enabled", bool(body.get("discord_receive_enabled", True)))
-        self.store.set_setting(guild_id, "transport_announcements", bool(body.get("transport_announcements", True)))
+            self.store.add_channel(guild_id, channel_id, commit=commit)
+        self.store.set_settings(
+            guild_id,
+            {
+                "discord_relay_channel_id": channel_id or None,
+                "discord_enabled": bool(body.get("discord_enabled", False)),
+                "discord_forward_enabled": bool(body.get("discord_forward_enabled", True)),
+                "discord_receive_enabled": bool(body.get("discord_receive_enabled", True)),
+                "transport_announcements": bool(body.get("transport_announcements", True)),
+            },
+            commit=commit,
+        )
         session_id = str(body.get("ssn_session_id") or "").strip()
         if session_id:
-            self.store.set_session(guild_id, session_id, [str(value).strip().lower() for value in body.get("ssn_targets", [])])
+            self.store.set_session(
+                guild_id,
+                session_id,
+                [str(value).strip().lower() for value in body.get("ssn_targets", [])],
+                commit=commit,
+            )
         else:
-            self.store.clear_session(guild_id)
+            self.store.clear_session(guild_id, commit=commit)
 
     async def update_workspace(self, request: web.Request) -> web.Response:
         user_id = self.require_user(request)
         body = await self.json_body(request)
         await self.validate_workspace(user_id, body)
         workspace_id = request.match_info["workspace_id"]
+        connections = body.get("connections", [])
+        if not isinstance(connections, list):
+            raise web.HTTPBadRequest(
+                text=json.dumps({"error": "Connections must be a list"}),
+                content_type="application/json",
+            )
         try:
-            self.store.save_workspace(user_id, body, workspace_id)
+            with self.store.transaction():
+                self.store.save_workspace(user_id, body, workspace_id, commit=False)
+                self.apply_discord_configuration(body, commit=False)
+                for connection in connections:
+                    if not isinstance(connection, dict):
+                        raise ValueError("Invalid direct connection")
+                    provider = str(connection.get("provider", ""))
+                    if provider not in self.connection_providers:
+                        raise ValueError(f"Unsupported provider: {provider}")
+                    self.store.set_workspace_connection(
+                        user_id,
+                        workspace_id,
+                        provider,
+                        str(connection.get("provider_user_id", "")),
+                        bool(connection.get("enabled", True)),
+                        connection.get("settings", {})
+                        if isinstance(connection.get("settings", {}), dict)
+                        else {},
+                        commit=False,
+                    )
         except ValueError as error:
             raise web.HTTPConflict(text=json.dumps({"error": str(error)}), content_type="application/json")
-        self.apply_discord_configuration(body)
         await self.changed(workspace_id)
         return web.json_response({"ok": True})
 

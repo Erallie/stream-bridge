@@ -429,7 +429,6 @@ class StreamBridge(commands.Bot):
         await asyncio.gather(*(hub.close() for hub in self.direct_hubs.values()), return_exceptions=True)
         await self.web.close()
         await self.kick.close()
-        await self.youtube.close()
         self.store.close()
         await super().close()
 
@@ -453,7 +452,6 @@ async def ssn_connect(i: discord.Interaction, session_id: str, relay_targets: st
     targets = parse_list(relay_targets)
     bot.store.set_session(str(i.guild_id), session_id.strip(), targets)
     bot.store.update_workspace_ssn_for_guild(str(i.guild_id), session_id.strip(), targets)
-    bot.store.remove_setting(str(i.guild_id), "ssn_password")
     await bot.reset_ssn(i.guild_id)
     config = bot.store.get(str(i.guild_id))
     if config:

@@ -4,6 +4,8 @@ import hashlib
 import json
 import sqlite3
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,7 +38,6 @@ class ConfigStore:
         self.connection.executescript("""
             CREATE TABLE IF NOT EXISTS guild_config(
                 guild_id TEXT PRIMARY KEY,
-                channel_id TEXT,
                 ssn_session_id TEXT,
                 relay_targets TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL
@@ -47,8 +48,6 @@ class ConfigStore:
                 created_at TEXT NOT NULL,
                 PRIMARY KEY(guild_id, channel_id)
             );
-            INSERT OR IGNORE INTO guild_channels
-                SELECT guild_id, channel_id, updated_at FROM guild_config WHERE channel_id IS NOT NULL;
             CREATE TABLE IF NOT EXISTS guild_settings(
                 guild_id TEXT NOT NULL,
                 key TEXT NOT NULL,
@@ -110,10 +109,8 @@ class ConfigStore:
             CREATE TABLE IF NOT EXISTS bridge_workspaces(
                 id TEXT PRIMARY KEY,
                 owner_user_id TEXT NOT NULL REFERENCES dashboard_users(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
                 discord_guild_id TEXT,
                 ssn_session_id TEXT,
-                ssn_password TEXT,
                 ssn_targets TEXT NOT NULL DEFAULT '',
                 relay_template TEXT NOT NULL DEFAULT '{name} ({platform}) said: {message}',
                 transport_announcements INTEGER NOT NULL DEFAULT 1,
@@ -134,10 +131,103 @@ class ConfigStore:
             CREATE INDEX IF NOT EXISTS bridge_workspaces_owner ON bridge_workspaces(owner_user_id);
         """)
         self.connection.commit()
+        self._migrate_schema()
+
+    def _columns(self, table: str) -> set[str]:
+        return {
+            str(row["name"])
+            for row in self.connection.execute(f"PRAGMA table_info({table})")
+        }
+
+    def _migrate_schema(self) -> None:
+        """Remove obsolete columns while preserving all active configuration."""
+        guild_columns = self._columns("guild_config")
+        workspace_columns = self._columns("bridge_workspaces")
+        migrate_guilds = "channel_id" in guild_columns
+        migrate_workspaces = bool({"name", "ssn_password"} & workspace_columns)
+        if not migrate_guilds and not migrate_workspaces:
+            return
+
+        self.connection.execute("PRAGMA foreign_keys=OFF")
+        try:
+            with self.connection:
+                if migrate_guilds:
+                    self.connection.execute(
+                        "INSERT OR IGNORE INTO guild_channels "
+                        "SELECT guild_id, channel_id, updated_at FROM guild_config "
+                        "WHERE channel_id IS NOT NULL"
+                    )
+                    self.connection.execute("DROP TABLE IF EXISTS guild_config_migrated")
+                    self.connection.execute(
+                        """CREATE TABLE guild_config_migrated(
+                               guild_id TEXT PRIMARY KEY,
+                               ssn_session_id TEXT,
+                               relay_targets TEXT NOT NULL DEFAULT '',
+                               updated_at TEXT NOT NULL
+                           )"""
+                    )
+                    self.connection.execute(
+                        "INSERT INTO guild_config_migrated "
+                        "SELECT guild_id, ssn_session_id, relay_targets, updated_at FROM guild_config"
+                    )
+                    self.connection.execute("DROP TABLE guild_config")
+                    self.connection.execute(
+                        "ALTER TABLE guild_config_migrated RENAME TO guild_config"
+                    )
+
+                if migrate_workspaces:
+                    self.connection.execute("DROP TABLE IF EXISTS bridge_workspaces_migrated")
+                    self.connection.execute(
+                        """CREATE TABLE bridge_workspaces_migrated(
+                               id TEXT PRIMARY KEY,
+                               owner_user_id TEXT NOT NULL REFERENCES dashboard_users(id) ON DELETE CASCADE,
+                               discord_guild_id TEXT,
+                               ssn_session_id TEXT,
+                               ssn_targets TEXT NOT NULL DEFAULT '',
+                               relay_template TEXT NOT NULL DEFAULT '{name} ({platform}) said: {message}',
+                               transport_announcements INTEGER NOT NULL DEFAULT 1,
+                               enabled INTEGER NOT NULL DEFAULT 1,
+                               created_at TEXT NOT NULL,
+                               updated_at TEXT NOT NULL
+                           )"""
+                    )
+                    self.connection.execute(
+                        """INSERT INTO bridge_workspaces_migrated
+                               (id, owner_user_id, discord_guild_id, ssn_session_id,
+                                ssn_targets, relay_template, transport_announcements,
+                                enabled, created_at, updated_at)
+                           SELECT id, owner_user_id, discord_guild_id, ssn_session_id,
+                                  ssn_targets, relay_template, transport_announcements,
+                                  enabled, created_at, updated_at
+                           FROM bridge_workspaces"""
+                    )
+                    self.connection.execute("DROP TABLE bridge_workspaces")
+                    self.connection.execute(
+                        "ALTER TABLE bridge_workspaces_migrated RENAME TO bridge_workspaces"
+                    )
+                    self.connection.execute(
+                        "CREATE INDEX IF NOT EXISTS bridge_workspaces_owner "
+                        "ON bridge_workspaces(owner_user_id)"
+                    )
+        finally:
+            self.connection.execute("PRAGMA foreign_keys=ON")
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Commit a group of configuration changes together or roll them all back."""
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except Exception:
+            self.connection.rollback()
+            raise
+        else:
+            self.connection.commit()
 
     def _ensure(self, guild_id: str) -> None:
         self.connection.execute(
-            "INSERT OR IGNORE INTO guild_config VALUES(?, NULL, NULL, '', ?)",
+            "INSERT OR IGNORE INTO guild_config "
+            "(guild_id, ssn_session_id, relay_targets, updated_at) VALUES(?, NULL, '', ?)",
             (guild_id, now()),
         )
 
@@ -163,51 +253,81 @@ class ConfigStore:
     def guild_ids(self) -> list[str]:
         return [row[0] for row in self.connection.execute("SELECT guild_id FROM guild_config")]
 
-    def set_session(self, guild_id: str, session_id: str, targets: list[str]) -> None:
+    def set_session(
+        self,
+        guild_id: str,
+        session_id: str,
+        targets: list[str],
+        *,
+        commit: bool = True,
+    ) -> None:
         self._ensure(guild_id)
         self.connection.execute(
             "UPDATE guild_config SET ssn_session_id=?, relay_targets=?, updated_at=? WHERE guild_id=?",
             (session_id, ",".join(targets), now(), guild_id),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
-    def clear_session(self, guild_id: str) -> None:
+    def clear_session(self, guild_id: str, *, commit: bool = True) -> None:
         self.connection.execute(
             "UPDATE guild_config SET ssn_session_id=NULL, relay_targets='', updated_at=? WHERE guild_id=?",
             (now(), guild_id),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
-    def add_channel(self, guild_id: str, channel_id: str) -> bool:
+    def add_channel(self, guild_id: str, channel_id: str, *, commit: bool = True) -> bool:
         self._ensure(guild_id)
         result = self.connection.execute(
             "INSERT OR IGNORE INTO guild_channels VALUES(?, ?, ?)",
             (guild_id, channel_id, now()),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         return result.rowcount > 0
 
-    def remove_channel(self, guild_id: str, channel_id: str) -> bool:
-        result = self.connection.execute(
-            "DELETE FROM guild_channels WHERE guild_id=? AND channel_id=?",
-            (guild_id, channel_id),
-        )
-        self.connection.commit()
-        return result.rowcount > 0
-
-    def clear_channels(self, guild_id: str) -> int:
+    def clear_channels(self, guild_id: str, *, commit: bool = True) -> int:
         result = self.connection.execute("DELETE FROM guild_channels WHERE guild_id=?", (guild_id,))
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         return result.rowcount
 
-    def set_setting(self, guild_id: str, key: str, value: Any) -> None:
+    def set_setting(
+        self,
+        guild_id: str,
+        key: str,
+        value: Any,
+        *,
+        commit: bool = True,
+    ) -> None:
         self._ensure(guild_id)
         self.connection.execute(
             "INSERT INTO guild_settings VALUES(?, ?, ?) "
             "ON CONFLICT(guild_id, key) DO UPDATE SET value=excluded.value",
             (guild_id, key, json.dumps(value)),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
+
+    def set_settings(
+        self,
+        guild_id: str,
+        values: dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> None:
+        self._ensure(guild_id)
+        self.connection.executemany(
+            "INSERT INTO guild_settings VALUES(?, ?, ?) "
+            "ON CONFLICT(guild_id, key) DO UPDATE SET value=excluded.value",
+            (
+                (guild_id, key, json.dumps(value))
+                for key, value in values.items()
+            ),
+        )
+        if commit:
+            self.connection.commit()
 
     def get_setting(self, guild_id: str, key: str, default: Any = None) -> Any:
         row = self.connection.execute(
@@ -215,13 +335,6 @@ class ConfigStore:
             (guild_id, key),
         ).fetchone()
         return json.loads(row[0]) if row else default
-
-    def remove_setting(self, guild_id: str, key: str) -> None:
-        self.connection.execute(
-            "DELETE FROM guild_settings WHERE guild_id=? AND key=?",
-            (guild_id, key),
-        )
-        self.connection.commit()
 
     @staticmethod
     def event_key(platform: str, message_id: str, user_id: str, text: str, timestamp: int | str) -> tuple[str, str]:
@@ -361,7 +474,14 @@ class ConfigStore:
             result.append(item)
         return result
 
-    def save_workspace(self, user_id: str, data: dict[str, Any], workspace_id: str | None = None) -> str:
+    def save_workspace(
+        self,
+        user_id: str,
+        data: dict[str, Any],
+        workspace_id: str | None = None,
+        *,
+        commit: bool = True,
+    ) -> str:
         if workspace_id is None:
             existing_workspace = self.connection.execute(
                 "SELECT id FROM bridge_workspaces WHERE owner_user_id=? LIMIT 1",
@@ -385,18 +505,22 @@ class ConfigStore:
         created = str(existing["created_at"]) if existing else stamp
         targets = ",".join(dict.fromkeys(str(value).lower() for value in data.get("ssn_targets", []) if value))
         self.connection.execute(
-            """INSERT INTO bridge_workspaces VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(id) DO UPDATE SET name=excluded.name, discord_guild_id=excluded.discord_guild_id,
-               ssn_session_id=excluded.ssn_session_id, ssn_password=excluded.ssn_password,
+            """INSERT INTO bridge_workspaces
+               (id, owner_user_id, discord_guild_id, ssn_session_id, ssn_targets,
+                relay_template, transport_announcements, enabled, created_at, updated_at)
+               VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET discord_guild_id=excluded.discord_guild_id,
+               ssn_session_id=excluded.ssn_session_id,
                ssn_targets=excluded.ssn_targets, relay_template=excluded.relay_template,
                transport_announcements=excluded.transport_announcements, enabled=excluded.enabled,
                updated_at=excluded.updated_at""",
-            (workspace_id, user_id, str(data.get("name", "My stream"))[:80], discord_guild_id,
-             data.get("ssn_session_id") or None, data.get("ssn_password") or None, targets,
+            (workspace_id, user_id, discord_guild_id,
+             data.get("ssn_session_id") or None, targets,
              str(data.get("relay_template", "{name} ({platform}) said: {message}")),
              int(bool(data.get("transport_announcements", True))), int(bool(data.get("enabled", True))), created, stamp),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         return workspace_id
 
     def update_workspace_ssn_for_guild(self, guild_id: str, session_id: str | None,
@@ -414,8 +538,17 @@ class ConfigStore:
         )
         self.connection.commit()
 
-    def set_workspace_connection(self, user_id: str, workspace_id: str, provider: str,
-                                 provider_user_id: str, enabled: bool, settings: dict[str, Any]) -> None:
+    def set_workspace_connection(
+        self,
+        user_id: str,
+        workspace_id: str,
+        provider: str,
+        provider_user_id: str,
+        enabled: bool,
+        settings: dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> None:
         owned = self.connection.execute("SELECT 1 FROM bridge_workspaces WHERE id=? AND owner_user_id=?", (workspace_id, user_id)).fetchone()
         identity_provider = "google" if provider == "youtube" else provider
         linked = self.connection.execute(
@@ -430,4 +563,5 @@ class ConfigStore:
                provider_user_id=excluded.provider_user_id, enabled=excluded.enabled, settings=excluded.settings""",
             (workspace_id, provider, provider_user_id, int(enabled), json.dumps(settings)),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()

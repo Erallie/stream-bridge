@@ -52,12 +52,6 @@ class YouTubeGateway:
         account = self.accounts.get(key)
         return account.token if account else None
 
-    def connected(self, key: RuntimeKey) -> bool:
-        return key in self.accounts
-
     def username(self, key: RuntimeKey) -> str:
         account = self.accounts.get(key)
         return account.title if account else ""
-
-    async def close(self) -> None:
-        return None

@@ -1,4 +1,7 @@
 import os
+import tempfile
+import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from streambridge.database import ConfigStore
@@ -10,11 +13,22 @@ async def ignore_event(key: int | str, data: dict) -> None:
     return None
 
 
-def test_only_dashboard_oauth_callbacks_are_registered(tmp_path) -> None:
-    with patch.dict(os.environ, {}, clear=True):
-        store = ConfigStore(str(tmp_path / "bot.sqlite"))
-        gateway = WebGateway(KickGateway(store, ignore_event))
-        routes = {(route.method, route.resource.canonical) for route in gateway.create_app().router.routes()}
-        assert ("POST", "/kick/webhook") in routes
-        assert ("GET", "/youtube/oauth/callback") not in routes
-        assert ("GET", "/kick/oauth/callback") not in routes
+class WebGatewayTests(unittest.TestCase):
+    def test_only_dashboard_oauth_callbacks_are_registered(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ, {}, clear=True
+        ):
+            store = ConfigStore(str(Path(directory) / "bot.sqlite"))
+            gateway = WebGateway(KickGateway(store, ignore_event))
+            routes = {
+                (route.method, route.resource.canonical)
+                for route in gateway.create_app().router.routes()
+            }
+            self.assertIn(("POST", "/kick/webhook"), routes)
+            self.assertNotIn(("GET", "/youtube/oauth/callback"), routes)
+            self.assertNotIn(("GET", "/kick/oauth/callback"), routes)
+            store.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
