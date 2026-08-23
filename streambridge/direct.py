@@ -172,10 +172,10 @@ class YouTubeAdapter:
         self.session: aiohttp.ClientSession | None = None
         self.waiting_for_broadcast = False
         try:
-            self.discovery_interval = max(60, float(os.getenv("YOUTUBE_DISCOVERY_INTERVAL", "180")))
+            self.discovery_interval = max(60, float(os.getenv("YOUTUBE_DISCOVERY_INTERVAL", "300")))
         except ValueError:
-            self.discovery_interval = 180
-            logging.warning("Invalid YOUTUBE_DISCOVERY_INTERVAL; using 180 seconds")
+            self.discovery_interval = 300
+            logging.warning("Invalid YOUTUBE_DISCOVERY_INTERVAL; using 300 seconds")
 
     def start(self) -> None:
         self.task = asyncio.create_task(self.run(), name="youtube-live-chat")
