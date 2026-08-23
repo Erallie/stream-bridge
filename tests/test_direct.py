@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import Mock
 
-from streambridge.direct import TwitchAdapter, YouTubeAdapter, youtube_error_reasons
+from streambridge.direct import DirectHub, TwitchAdapter, YouTubeAdapter, youtube_error_reasons
 from streambridge.kick import broadcaster_id, kick_chat_payload
 
 
@@ -27,6 +27,28 @@ class DirectAdapterTests(unittest.TestCase):
 
         asyncio.run(exercise())
         self.assertEqual(received[0]["chatimg"], "https://example.test/alex.png")
+
+    def test_twitch_broadcaster_messages_are_not_suppressed(self) -> None:
+        received = []
+
+        async def handler(payload):
+            received.append(payload)
+
+        async def exercise() -> None:
+            adapter = TwitchAdapter("channel", handler, Mock(), "broadcaster")
+
+            async def avatar(user_id: str, login: str) -> str:
+                return ""
+
+            adapter.get_avatar = avatar
+            await adapter.parse_message(
+                "@id=message-1;user-id=42;display-name=Broadcaster;color=#9146FF "
+                ":broadcaster!broadcaster@broadcaster.tmi.twitch.tv "
+                "PRIVMSG #channel :manual message"
+            )
+
+        asyncio.run(exercise())
+        self.assertEqual(received[0]["chatmessage"], "manual message")
 
     def test_kick_messages_use_application_bot_identity(self) -> None:
         payload = kick_chat_payload("x" * 501)
@@ -66,6 +88,32 @@ class DirectAdapterTests(unittest.TestCase):
 
         self.assertEqual(youtube_error_reasons(body), {"liveChatEnded"})
 
+    def test_youtube_broadcaster_messages_are_not_suppressed(self) -> None:
+        received = []
+
+        async def handler(payload):
+            received.append(payload)
+
+        async def exercise() -> None:
+            adapter = YouTubeAdapter(handler, Mock())
+            await adapter.parse_message(
+                {
+                    "id": "message-1",
+                    "snippet": {
+                        "type": "textMessageEvent",
+                        "displayMessage": "manual message",
+                    },
+                    "authorDetails": {
+                        "channelId": "channel-1",
+                        "displayName": "Broadcaster",
+                        "isChatOwner": True,
+                    },
+                }
+            )
+
+        asyncio.run(exercise())
+        self.assertEqual(received[0]["chatmessage"], "manual message")
+
     def test_youtube_waits_when_the_authorized_account_is_not_live(self) -> None:
         async def handler(payload):
             pass
@@ -80,6 +128,31 @@ class DirectAdapterTests(unittest.TestCase):
             adapter.get_session = lambda: asyncio.sleep(0, result=object())
             self.assertEqual(await adapter.discover_live_chat(), "")
             self.assertTrue(adapter.waiting_for_broadcast)
+
+        asyncio.run(exercise())
+
+    def test_reflections_track_the_exact_truncated_platform_message(self) -> None:
+        class Adapter:
+            def __init__(self) -> None:
+                self.sent = []
+
+            async def send(self, text: str) -> None:
+                self.sent.append(text)
+
+        async def handler(payload):
+            pass
+
+        async def exercise() -> None:
+            hub = DirectHub(handler)
+            twitch = Adapter()
+            youtube = Adapter()
+            hub.adapters = {"twitch": twitch, "youtube": youtube}
+            await hub.send("x" * 600)
+
+            self.assertEqual(twitch.sent, ["x" * 500])
+            self.assertEqual(youtube.sent, ["x" * 200])
+            self.assertTrue(hub.reflections.consume("twitch", "x" * 500))
+            self.assertTrue(hub.reflections.consume("youtube", "x" * 200))
 
         asyncio.run(exercise())
 

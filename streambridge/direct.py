@@ -110,9 +110,6 @@ class TwitchAdapter:
         prefix, text = rest.split(" PRIVMSG ", 1)
         _, message = text.split(" :", 1)
         login = prefix.split("!", 1)[0].lstrip(":")
-        if login.casefold() == self.username.casefold():
-            logging.debug("Suppressed message echoed from StreamBridge's Twitch relay account")
-            return
         user_id = tags.get("user-id", "")
         avatar_url = await self.get_avatar(user_id, login)
         await self.handler({"type": "twitch", "id": tags.get("id", ""), "userid": user_id or login, "chatname": tags.get("display-name", login), "username": login, "chatmessage": message, "chatimg": avatar_url, "nameColor": tags.get("color", ""), "source": "direct"})
@@ -251,13 +248,7 @@ class YouTubeAdapter:
                 self.page_token = body.get("nextPageToken", self.page_token)
                 if not initial:
                     for item in body.get("items", []):
-                        snippet, author = item.get("snippet", {}), item.get("authorDetails", {})
-                        if snippet.get("type") != "textMessageEvent":
-                            continue
-                        if author.get("isChatOwner"):
-                            logging.debug("Suppressed message from StreamBridge's YouTube relay account")
-                            continue
-                        await self.handler({"type": "youtube", "id": item.get("id", ""), "userid": author.get("channelId", ""), "chatname": author.get("displayName", ""), "username": author.get("displayName", ""), "chatmessage": snippet.get("displayMessage", ""), "chatimg": author.get("profileImageUrl", ""), "source": "direct"})
+                        await self.parse_message(item)
                 await asyncio.sleep(max(1, int(body.get("pollingIntervalMillis", 5000)) / 1000))
             except asyncio.CancelledError:
                 return
@@ -266,6 +257,12 @@ class YouTubeAdapter:
                 self.live_chat_id = ""
                 self.page_token = ""
                 await asyncio.sleep(15)
+
+    async def parse_message(self, item: dict[str, Any]) -> None:
+        snippet, author = item.get("snippet", {}), item.get("authorDetails", {})
+        if snippet.get("type") != "textMessageEvent":
+            return
+        await self.handler({"type": "youtube", "id": item.get("id", ""), "userid": author.get("channelId", ""), "chatname": author.get("displayName", ""), "username": author.get("displayName", ""), "chatmessage": snippet.get("displayMessage", ""), "chatimg": author.get("profileImageUrl", ""), "source": "direct"})
 
     async def send(self, text: str) -> None:
         if not self.oauth.configured:
@@ -311,12 +308,19 @@ class DirectHub:
 
     async def send(self, text: str, exclude: str = "") -> None:
         destinations = [(platform, adapter) for platform, adapter in self.adapters.items() if platform != exclude]
-        for platform, _ in destinations:
-            self.reflections.add(platform, text)
-        results = await asyncio.gather(*(adapter.send(text) for _, adapter in destinations), return_exceptions=True)
+        outbound = {
+            platform: text[:200] if platform == "youtube" else text[:500]
+            for platform, _ in destinations
+        }
+        for platform, relay_text in outbound.items():
+            self.reflections.add(platform, relay_text)
+        results = await asyncio.gather(
+            *(adapter.send(outbound[platform]) for platform, adapter in destinations),
+            return_exceptions=True,
+        )
         for (platform, _), result in zip(destinations, results, strict=True):
             if isinstance(result, Exception):
-                self.reflections.discard(platform, text)
+                self.reflections.discard(platform, outbound[platform])
                 logging.error("Direct %s send failed: %s", platform, result)
 
     async def close(self) -> None:

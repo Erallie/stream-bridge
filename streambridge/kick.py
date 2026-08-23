@@ -179,11 +179,12 @@ class KickGateway:
         account = self.accounts.get(key)
         if not account:
             return
-        self.reflections[key].add("kick", text)
+        outbound = text[:500]
+        self.reflections[key].add("kick", outbound)
         try:
-            await account.send(text)
+            await account.send(outbound)
         except Exception:
-            self.reflections[key].discard("kick", text)
+            self.reflections[key].discard("kick", outbound)
             raise
 
     def connected(self, key: RuntimeKey) -> bool:
