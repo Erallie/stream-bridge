@@ -584,7 +584,7 @@ async def set_direct_connection_enabled(
     await bot.reload_workspace(str(workspace["id"]))
     state = "enabled" if enabled else "disabled"
     await i.response.send_message(
-        f"Direct {platform.title()} {state}. Its linked account was retained.",
+        f"Direct {platform.title()} {state}.{' Its linked account was retained.' if not enabled else '' }",
         ephemeral=True,
     )
 
