@@ -507,8 +507,8 @@ async def channel_set(
     bot.store.set_setting(guild_id, "discord_receive_enabled", receive)
     await i.response.send_message(
         f"Discord relay channel set to {channel.mention}. "
-        f"Forwarding: {'enabled' if forward else 'disabled'}. "
-        f"Receiving: {'enabled' if receive else 'disabled'}.",
+        f"Forwarding: {'`enabled`' if forward else '`disabled`'}. "
+        f"Receiving: {'`enabled`' if receive else '`disabled`'}.",
         ephemeral=True,
     )
 
