@@ -531,7 +531,7 @@ direct_group = app_commands.Group(name="direct", description="Configure direct p
 async def send_dashboard_link(i: discord.Interaction, action: str) -> None:
     await i.response.send_message(
         f"[Open the StreamBridge dashboard]({dashboard_url()}) to {action}. "
-        "Sign in, select or create the bridge for this Discord server, and link the platform account there.",
+        "Sign in, edit your bridge settings, and link platform accounts there.",
         ephemeral=True,
     )
 
