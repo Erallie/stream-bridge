@@ -23,7 +23,7 @@ StreamBridge can connect directly to Twitch, YouTube, and Kick. It can also inte
 
 - **Direct platform connections** — Connect Twitch, YouTube, and Kick directly so relay continues without a running Social Stream Ninja host.
 
-- **Social Stream Ninja integration** — Connect an SSN session for additional platforms and destinations.
+- **Social Stream Ninja integration** — Connect an SSN session to include additional streaming platforms and let SSN handle their relay while the session is available.
 
 - **Automatic transport switching** — Prefer Social Stream Ninja when it is available and return to direct platform connections when SSN goes offline.
 
@@ -59,7 +59,7 @@ A typical standalone setup is managed entirely through the StreamBridge dashboar
 2. Sign in with Discord, Google/YouTube, Twitch, or Kick.
 3. Link the other platform accounts the bridge should use.
 4. Enable Twitch, Kick, and/or YouTube under **Direct Connection**.
-5. Optionally connect a Social Stream Ninja session and choose its platform targets.
+5. Optionally connect a Social Stream Ninja session and choose the platforms handled through SSN.
 6. Save the bridge.
 
 Once two or more destinations are enabled, StreamBridge can relay messages between them. Discord is optional and can be linked later without rebuilding the streaming-platform configuration.
@@ -97,7 +97,7 @@ The same saved channel is used for both directions when both are enabled.
 StreamBridge supports two relay methods:
 
 - **Direct mode:** StreamBridge connects directly to Twitch, YouTube, and Kick.
-- **Social Stream Ninja mode:** StreamBridge sends messages through a configured Social Stream Ninja session.
+- **Social Stream Ninja mode:** StreamBridge includes additional streaming platforms and lets SSN handle their relay while the session is available.
 
 If Social Stream Ninja becomes available, StreamBridge can switch to SSN automatically. If SSN goes offline, StreamBridge switches back to its configured direct connections.
 
@@ -280,7 +280,7 @@ Connects the Discord server to a Social Stream Ninja session.
 /ssn connect session_id:SESSION_ID relay_targets:PLATFORMS
 ```
 
-`relay_targets` is a comma-separated list. For example:
+`relay_targets` is the comma-separated list of platforms handled through SSN. For example:
 
 ```text
 /ssn connect session_id:your-session-id relay_targets:twitch,youtube,kick,tiktok
@@ -291,6 +291,8 @@ If `relay_targets` is omitted, the default is:
 ```text
 twitch,youtube,kick,tiktok
 ```
+
+Enter platforms routed through SSN, separated by commas. This also helps prevent duplicate reflections. Do not add `discord`; StreamBridge handles it separately.
 
 The Social Stream Ninja overlay-room password is not required. StreamBridge uses the SSN session ID.
 
@@ -336,7 +338,7 @@ The status includes:
 
 - The shared Discord relay channel followed by `(forwarding/receiving)`, `(forwarding only)`, or `(receiving only)`; it displays `Disabled` when Discord integration is disabled
 - Whether an SSN session is configured and connected
-- Platforms assigned to SSN
+- Platforms handled through SSN
 - Directly connected platforms and accounts
 - The current direct relay message template
 
@@ -391,7 +393,7 @@ Direct mode continues working even when the computer running Social Stream Ninja
 
 When StreamBridge detects an active SSN host, it can let SSN handle the platform relay. When the SSN host stops responding, StreamBridge returns to direct mode.
 
-The exact platforms available through SSN depend on the connected Social Stream Ninja setup.
+The exact platforms available through SSN depend on the connected Social Stream Ninja setup (supported SSN platforms are listed [here](https://socialstream.ninja/docs/supported-sites.html)). Enter platforms routed through SSN as a comma-separated list. This also helps prevent duplicate reflections. Do not add `discord`; StreamBridge handles it separately.
 
 ## Using the web dashboard
 
@@ -401,7 +403,7 @@ From the dashboard, you can:
 
 - Connect or disconnect Twitch, YouTube, Kick, and Discord accounts.
 - Enable direct connections for the platforms you want to relay.
-- Connect Social Stream Ninja and choose any SSN-supported destination platforms.
+- Connect Social Stream Ninja and choose the platforms handled through SSN.
 - Choose the Discord channel used for relay, if you want Discord integration.
 - Independently enable messages sent from Discord and messages received in Discord.
 - Customize the message format used for direct platform relay.
