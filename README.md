@@ -393,7 +393,7 @@ Direct mode continues working even when the computer running Social Stream Ninja
 
 When StreamBridge detects an active SSN host, it can let SSN handle the platform relay. When the SSN host stops responding, StreamBridge returns to direct mode.
 
-The exact platforms available through SSN depend on the connected Social Stream Ninja setup (supported SSN platforms are listed [here](https://socialstream.ninja/docs/supported-sites.html)). Enter platforms routed through SSN as a comma-separated list. This also helps prevent duplicate reflections. Do not add `discord`; StreamBridge handles it separately.
+The exact platforms available through SSN depend on the connected Social Stream Ninja setup and are listed [here](https://socialstream.ninja/docs/supported-sites.html). Enter platforms routed through SSN as a comma-separated list. This also helps prevent duplicate reflections. Do not add `discord`; StreamBridge handles it separately.
 
 ## Using the web dashboard
 
