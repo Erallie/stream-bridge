@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 import logging
 import os
 import secrets
+import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
@@ -51,6 +53,8 @@ class DashboardAPI:
         self.public_url = os.getenv("DASHBOARD_API_PUBLIC_URL", "http://localhost:8765").rstrip("/")
         self.cookie_name = "streambridge_session"
         self.session: aiohttp.ClientSession | None = None
+        self.discord_guild_cache: dict[str, tuple[float, list[dict[str, str]]]] = {}
+        self.discord_refresh_locks: dict[str, asyncio.Lock] = {}
         key = os.getenv("TOKEN_ENCRYPTION_KEY", "")
         self.fernet = Fernet(key.encode()) if key else None
 
@@ -172,6 +176,8 @@ class DashboardAPI:
                 text=json.dumps({"error": str(error)}),
                 content_type="application/json",
             )
+        if provider == "discord":
+            self.discord_guild_cache.pop(user_id, None)
         for workspace_id in affected_workspace_ids:
             await self.changed(workspace_id)
         return web.json_response(
@@ -273,6 +279,9 @@ class DashboardAPI:
                 raise web.HTTPBadRequest(text=json.dumps({"error": "Invalid Discord channel"}), content_type="application/json")
 
     async def available_discord_guilds(self, user_id: str) -> list[dict[str, str]]:
+        cached = self.discord_guild_cache.get(user_id)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
         identity = next(
             (item for item in self.store.dashboard_identities(user_id, include_tokens=True) if item["provider"] == "discord"),
             None,
@@ -283,22 +292,107 @@ class DashboardAPI:
         if not access_token:
             return []
         session = await self.http()
-        async with session.get(
-            "https://discord.com/api/v10/users/@me/guilds",
-            headers={"Authorization": f"Bearer {access_token}"},
-        ) as response:
-            body = await response.json(content_type=None)
-            if response.status >= 400:
-                raise web.HTTPUnauthorized(
-                    text=json.dumps({"error": "Reconnect Discord to refresh server access"}),
-                    content_type="application/json",
-                )
+        for attempt in range(2):
+            async with session.get(
+                "https://discord.com/api/v10/users/@me/guilds",
+                headers={"Authorization": f"Bearer {access_token}"},
+            ) as response:
+                body = await response.json(content_type=None)
+                status = response.status
+            if status == 401 and attempt == 0:
+                access_token = await self.refresh_discord_access(user_id, identity, access_token)
+                continue
+            break
+        if status == 401:
+            raise web.HTTPUnauthorized(
+                text=json.dumps({"error": "Discord authorization was revoked. Reconnect Discord to continue."}),
+                content_type="application/json",
+            )
+        if status == 429:
+            raise web.HTTPTooManyRequests(
+                text=json.dumps({"error": "Discord is temporarily rate limiting server access. Try again shortly."}),
+                content_type="application/json",
+            )
+        if status >= 500:
+            raise web.HTTPServiceUnavailable(
+                text=json.dumps({"error": "Discord is temporarily unavailable. Try again shortly."}),
+                content_type="application/json",
+            )
+        if status >= 400 or not isinstance(body, list):
+            raise web.HTTPBadGateway(
+                text=json.dumps({"error": "Discord could not provide the server list."}),
+                content_type="application/json",
+            )
         administrator = 1 << 3
-        return [
+        guilds = [
             {"id": str(guild["id"]), "name": str(guild.get("name", "Discord server"))}
             for guild in body
             if guild.get("owner") or int(guild.get("permissions", "0")) & administrator
         ]
+        self.discord_guild_cache[user_id] = (time.monotonic() + 60, guilds)
+        return guilds
+
+    async def refresh_discord_access(
+        self,
+        user_id: str,
+        identity: dict[str, Any],
+        expired_access_token: str,
+    ) -> str:
+        provider_user_id = str(identity["provider_user_id"])
+        lock = self.discord_refresh_locks.setdefault(user_id, asyncio.Lock())
+        async with lock:
+            latest = next(
+                (
+                    item
+                    for item in self.store.dashboard_identities(user_id, include_tokens=True)
+                    if item["provider"] == "discord"
+                ),
+                None,
+            )
+            if not latest:
+                raise web.HTTPUnauthorized(
+                    text=json.dumps({"error": "Discord is no longer linked."}),
+                    content_type="application/json",
+                )
+            current_access_token = self.decrypt(str(latest["access_token"]))
+            if current_access_token and current_access_token != expired_access_token:
+                return current_access_token
+            refresh_token = self.decrypt(str(latest["refresh_token"]))
+            client_id = os.getenv("DISCORD_CLIENT_ID", "")
+            client_secret = os.getenv("DISCORD_CLIENT_SECRET", "")
+            if not refresh_token or not client_id or not client_secret:
+                raise web.HTTPUnauthorized(
+                    text=json.dumps({"error": "Reconnect Discord to refresh server access."}),
+                    content_type="application/json",
+                )
+            session = await self.http()
+            async with session.post(
+                "https://discord.com/api/v10/oauth2/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+            ) as response:
+                token = await response.json(content_type=None)
+                status = response.status
+            if status >= 400 or not isinstance(token, dict) or not token.get("access_token"):
+                logging.warning("Discord OAuth refresh failed with HTTP %s", status)
+                raise web.HTTPUnauthorized(
+                    text=json.dumps({"error": "Discord authorization expired or was revoked. Reconnect Discord to continue."}),
+                    content_type="application/json",
+                )
+            access_token = str(token["access_token"])
+            rotated_refresh_token = str(token.get("refresh_token", ""))
+            self.store.update_dashboard_tokens(
+                "discord",
+                provider_user_id,
+                self.encrypt(access_token),
+                self.encrypt(rotated_refresh_token) if rotated_refresh_token else "",
+            )
+            logging.info("Refreshed Discord dashboard authorization")
+            return access_token
 
     async def discord_guilds(self, request: web.Request) -> web.Response:
         return web.json_response({"guilds": await self.available_discord_guilds(self.require_user(request))})
@@ -448,6 +542,8 @@ class DashboardAPI:
             identity["access_token"] = self.encrypt(identity.get("access_token", ""))
             identity["refresh_token"] = self.encrypt(identity.get("refresh_token", ""))
             self.store.save_dashboard_identity(user_id, identity)
+            if provider == "discord":
+                self.discord_guild_cache.pop(user_id, None)
             response = web.HTTPFound(f"{pending['return_to']}?auth=success")
             self.issue_session(response, user_id)
             return response

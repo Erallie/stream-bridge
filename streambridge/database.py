@@ -482,6 +482,28 @@ class ConfigStore:
         )
         self.connection.commit()
 
+    def update_dashboard_tokens(
+        self,
+        provider: str,
+        provider_user_id: str,
+        encrypted_access_token: str,
+        encrypted_refresh_token: str = "",
+    ) -> None:
+        self.connection.execute(
+            """UPDATE dashboard_identities SET access_token=?,
+               refresh_token=CASE WHEN ?='' THEN refresh_token ELSE ? END,
+               updated_at=? WHERE provider=? AND provider_user_id=?""",
+            (
+                encrypted_access_token,
+                encrypted_refresh_token,
+                encrypted_refresh_token,
+                now(),
+                provider,
+                provider_user_id,
+            ),
+        )
+        self.connection.commit()
+
     def save_dashboard_session(self, token_hash: str, user_id: str, expires_at: str) -> None:
         self.connection.execute("INSERT INTO dashboard_sessions VALUES(?, ?, ?, ?)", (token_hash, user_id, expires_at, now()))
         self.connection.commit()

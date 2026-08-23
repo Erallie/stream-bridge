@@ -4,7 +4,9 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
+
+from cryptography.fernet import Fernet
 
 from streambridge.dashboard import DashboardAPI
 from streambridge.database import ConfigStore
@@ -71,6 +73,81 @@ class DashboardTests(unittest.TestCase):
         self.store.save_dashboard_identity(first, identity)
         with self.assertRaisesRegex(ValueError, "already linked"):
             self.store.save_dashboard_identity(second, identity)
+
+    def test_discord_access_is_refreshed_and_server_list_is_cached(self) -> None:
+        class Response:
+            def __init__(self, status, body):
+                self.status = status
+                self.body = body
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                return False
+
+            async def json(self, content_type=None):
+                return self.body
+
+        class Session:
+            def __init__(self):
+                self.get_calls = 0
+                self.post_calls = 0
+
+            def get(self, url, **kwargs):
+                self.get_calls += 1
+                if self.get_calls == 1:
+                    return Response(401, {"message": "401: Unauthorized"})
+                return Response(
+                    200,
+                    [{"id": "guild-1", "name": "Server", "owner": True}],
+                )
+
+            def post(self, url, **kwargs):
+                self.post_calls += 1
+                return Response(
+                    200,
+                    {
+                        "access_token": "new-access",
+                        "refresh_token": "new-refresh",
+                        "expires_in": 604800,
+                    },
+                )
+
+        key = Fernet.generate_key().decode()
+        with patch.dict(
+            "os.environ",
+            {
+                "TOKEN_ENCRYPTION_KEY": key,
+                "DISCORD_CLIENT_ID": "client-id",
+                "DISCORD_CLIENT_SECRET": "client-secret",
+            },
+        ):
+            dashboard = DashboardAPI(self.store)
+            user_id = self.store.create_dashboard_user()
+            self.store.save_dashboard_identity(
+                user_id,
+                {
+                    "provider": "discord",
+                    "provider_user_id": "discord-1",
+                    "display_name": "Discord user",
+                    "access_token": dashboard.encrypt("expired-access"),
+                    "refresh_token": dashboard.encrypt("old-refresh"),
+                },
+            )
+            session = Session()
+            dashboard.http = AsyncMock(return_value=session)
+
+            first = asyncio.run(dashboard.available_discord_guilds(user_id))
+            second = asyncio.run(dashboard.available_discord_guilds(user_id))
+
+            self.assertEqual(first, [{"id": "guild-1", "name": "Server"}])
+            self.assertEqual(second, first)
+            self.assertEqual(session.get_calls, 2)
+            self.assertEqual(session.post_calls, 1)
+            identity = self.store.dashboard_identities(user_id, include_tokens=True)[0]
+            self.assertEqual(dashboard.decrypt(identity["access_token"]), "new-access")
+            self.assertEqual(dashboard.decrypt(identity["refresh_token"]), "new-refresh")
 
     def test_unlink_identity_removes_its_connection_atomically(self) -> None:
         user_id = self.store.create_dashboard_user()
