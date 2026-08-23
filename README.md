@@ -485,6 +485,8 @@ Verify:
 
 The authorized YouTube channel must have an active livestream with live chat enabled. StreamBridge automatically waits for and discovers the active chat.
 
+While the channel is offline, StreamBridge checks for a new active YouTube livestream approximately every five minutes. It may therefore take up to five minutes to detect a stream after it goes live.
+
 ### The wrong platform account appears
 
 Sign out of that platform in your browser, open a private/incognito window, sign into the intended broadcaster account, and link it again from the dashboard.
