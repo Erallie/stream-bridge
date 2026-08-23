@@ -72,6 +72,84 @@ class DashboardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already linked"):
             self.store.save_dashboard_identity(second, identity)
 
+    def test_unlink_identity_removes_its_connection_atomically(self) -> None:
+        user_id = self.store.create_dashboard_user()
+        for provider, provider_user_id in (("google", "google-1"), ("twitch", "twitch-1")):
+            self.store.save_dashboard_identity(
+                user_id,
+                {
+                    "provider": provider,
+                    "provider_user_id": provider_user_id,
+                    "display_name": provider.title(),
+                },
+            )
+        workspace_id = self.store.save_workspace(
+            user_id,
+            {"ssn_targets": [], "relay_template": "{name} ({platform}) said: {message}"},
+        )
+        self.store.set_workspace_connection(
+            user_id, workspace_id, "twitch", "twitch-1", True, {}
+        )
+
+        with self.store.transaction():
+            affected = self.store.unlink_dashboard_identity(user_id, "twitch")
+
+        self.assertEqual(affected, [workspace_id])
+        self.assertEqual(
+            [identity["provider"] for identity in self.store.dashboard_identities(user_id)],
+            ["google"],
+        )
+        self.assertEqual(self.store.workspaces(user_id)[0]["connections"], [])
+
+    def test_only_sign_in_identity_cannot_be_disconnected(self) -> None:
+        user_id = self.store.create_dashboard_user()
+        self.store.save_dashboard_identity(
+            user_id,
+            {
+                "provider": "discord",
+                "provider_user_id": "discord-1",
+                "display_name": "Discord",
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "only sign-in method"):
+            with self.store.transaction():
+                self.store.unlink_dashboard_identity(user_id, "discord")
+
+        self.assertEqual(len(self.store.dashboard_identities(user_id)), 1)
+
+    def test_unlink_discord_disables_relay_but_preserves_channel(self) -> None:
+        user_id = self.store.create_dashboard_user()
+        for provider in ("discord", "twitch"):
+            self.store.save_dashboard_identity(
+                user_id,
+                {
+                    "provider": provider,
+                    "provider_user_id": f"{provider}-1",
+                    "display_name": provider.title(),
+                },
+            )
+        workspace_id = self.store.save_workspace(
+            user_id,
+            {
+                "discord_guild_id": "guild-1",
+                "ssn_targets": [],
+                "relay_template": "{name} ({platform}) said: {message}",
+            },
+        )
+        self.store.add_channel("guild-1", "channel-1")
+        self.store.set_settings(
+            "guild-1",
+            {"discord_relay_channel_id": "channel-1", "discord_enabled": True},
+        )
+
+        with self.store.transaction():
+            affected = self.store.unlink_dashboard_identity(user_id, "discord")
+
+        self.assertEqual(affected, [workspace_id])
+        self.assertFalse(self.store.get_setting("guild-1", "discord_enabled"))
+        self.assertEqual(self.store.get("guild-1").channel_ids, ("channel-1",))
+
     def test_account_can_only_have_one_workspace(self) -> None:
         user_id = self.store.create_dashboard_user()
         body = {

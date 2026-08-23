@@ -58,6 +58,7 @@ class DashboardAPI:
         app.middlewares.append(self.cors_middleware)
         app.router.add_get("/dashboard/api/health", self.health)
         app.router.add_get("/dashboard/api/me", self.me)
+        app.router.add_delete("/dashboard/api/identities/{provider}", self.disconnect_identity)
         app.router.add_get("/dashboard/api/discord/guilds", self.discord_guilds)
         app.router.add_get("/dashboard/api/discord/guilds/{guild_id}/channels", self.discord_channels)
         app.router.add_post("/dashboard/api/logout", self.logout)
@@ -152,6 +153,30 @@ class DashboardAPI:
         response = web.json_response({"ok": True})
         response.del_cookie(self.cookie_name, path="/")
         return response
+
+    async def disconnect_identity(self, request: web.Request) -> web.Response:
+        user_id = self.require_user(request)
+        provider = request.match_info["provider"]
+        if provider not in self.providers:
+            raise web.HTTPBadRequest(
+                text=json.dumps({"error": "Unsupported provider"}),
+                content_type="application/json",
+            )
+        try:
+            with self.store.transaction():
+                affected_workspace_ids = self.store.unlink_dashboard_identity(
+                    user_id, provider
+                )
+        except ValueError as error:
+            raise web.HTTPConflict(
+                text=json.dumps({"error": str(error)}),
+                content_type="application/json",
+            )
+        for workspace_id in affected_workspace_ids:
+            await self.changed(workspace_id)
+        return web.json_response(
+            {"ok": True, "affected_workspace_ids": affected_workspace_ids}
+        )
 
     async def list_workspaces(self, request: web.Request) -> web.Response:
         user_id = self.require_user(request)

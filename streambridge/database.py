@@ -414,6 +414,67 @@ class ConfigStore:
             f"SELECT {columns} FROM dashboard_identities WHERE user_id=? ORDER BY provider", (user_id,)
         )]
 
+    def unlink_dashboard_identity(self, user_id: str, provider: str) -> list[str]:
+        """Remove a linked identity and relay assignments that depend on it.
+
+        The caller must wrap this operation in ``transaction()``.
+        """
+        identity = self.connection.execute(
+            "SELECT provider_user_id FROM dashboard_identities WHERE user_id=? AND provider=?",
+            (user_id, provider),
+        ).fetchone()
+        if not identity:
+            return []
+        identity_count = self.connection.execute(
+            "SELECT COUNT(*) FROM dashboard_identities WHERE user_id=?",
+            (user_id,),
+        ).fetchone()[0]
+        if identity_count <= 1:
+            raise ValueError(
+                "Link another account before disconnecting your only sign-in method"
+            )
+
+        workspace_rows = self.connection.execute(
+            "SELECT id, discord_guild_id FROM bridge_workspaces WHERE owner_user_id=?",
+            (user_id,),
+        ).fetchall()
+        affected_workspace_ids: set[str] = set()
+
+        if provider == "discord":
+            for workspace in workspace_rows:
+                guild_id = str(workspace["discord_guild_id"] or "")
+                if not guild_id:
+                    continue
+                self.set_setting(guild_id, "discord_enabled", False, commit=False)
+                affected_workspace_ids.add(str(workspace["id"]))
+        else:
+            connection_provider = "youtube" if provider == "google" else provider
+            matching_rows = self.connection.execute(
+                """SELECT workspace_id FROM workspace_connections
+                   WHERE workspace_id IN (
+                       SELECT id FROM bridge_workspaces WHERE owner_user_id=?
+                   ) AND provider=? AND provider_user_id=?""",
+                (user_id, connection_provider, str(identity["provider_user_id"])),
+            ).fetchall()
+            affected_workspace_ids.update(str(row["workspace_id"]) for row in matching_rows)
+            self.connection.execute(
+                """DELETE FROM workspace_connections
+                   WHERE workspace_id IN (
+                       SELECT id FROM bridge_workspaces WHERE owner_user_id=?
+                   ) AND provider=? AND provider_user_id=?""",
+                (user_id, connection_provider, str(identity["provider_user_id"])),
+            )
+
+        self.connection.execute(
+            "DELETE FROM dashboard_identities WHERE user_id=? AND provider=? AND provider_user_id=?",
+            (user_id, provider, str(identity["provider_user_id"])),
+        )
+        self.connection.execute(
+            "UPDATE dashboard_users SET updated_at=? WHERE id=?",
+            (now(), user_id),
+        )
+        return sorted(affected_workspace_ids)
+
     def update_dashboard_refresh_token(self, provider: str, provider_user_id: str, encrypted_token: str) -> None:
         self.connection.execute(
             "UPDATE dashboard_identities SET refresh_token=?, updated_at=? WHERE provider=? AND provider_user_id=?",
