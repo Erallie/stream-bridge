@@ -528,18 +528,17 @@ bot.tree.add_command(channel_group)
 direct_group = app_commands.Group(name="direct", description="Configure direct platform connections", default_permissions=discord.Permissions(administrator=True))
 
 
-async def send_dashboard_link(i: discord.Interaction, action: str) -> None:
+@direct_group.command(
+    name="setup",
+    description="Open the dashboard to configure direct platform connections",
+)
+async def direct_setup(i: discord.Interaction) -> None:
     await i.response.send_message(
-        f"[Open the StreamBridge dashboard]({dashboard_url()}) to {action}. "
-        "Sign in, edit your bridge settings, and link platform accounts there.",
+        f"[Open the StreamBridge dashboard]({dashboard_url()}) to configure "
+        "direct platform connections. Sign in, edit your bridge settings, "
+        "and link platform accounts there.",
         ephemeral=True,
     )
-
-
-@direct_group.command(name="setup", description="Open the dashboard to configure direct platform connections")
-async def direct_setup(i: discord.Interaction) -> None:
-    await send_dashboard_link(i, "configure direct platform connections")
-
 
 async def set_direct_connection_enabled(
     i: discord.Interaction,
