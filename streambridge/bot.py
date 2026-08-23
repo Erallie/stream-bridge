@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 import discord
 from discord import app_commands
-from discord import guild
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -124,9 +123,8 @@ class StreamBridge(commands.Bot):
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
             guild = discord.Object(id=int(guild_id))
-            self.tree.clear_commands(guild=guild)
+            self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-            print("Cleared guild commands.")
         else:
             await self.tree.sync()
 
