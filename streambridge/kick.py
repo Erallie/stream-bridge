@@ -21,6 +21,7 @@ from streambridge.relay import ReflectionTracker
 
 RuntimeKey: TypeAlias = int | str
 KickHandler = Callable[[RuntimeKey, dict[str, Any]], Awaitable[None]]
+KICK_BOT_USER_ID = "124763980"
 
 
 def kick_chat_payload(text: str) -> dict[str, str]:
@@ -78,7 +79,6 @@ class KickGateway:
         self.accounts: dict[RuntimeKey, KickAccount] = {}
         self.keys_by_broadcaster: dict[str, set[RuntimeKey]] = defaultdict(set)
         self.reflections: dict[RuntimeKey, ReflectionTracker] = defaultdict(ReflectionTracker)
-        self.relay_sender_ids: dict[RuntimeKey, str] = {}
         self.public_key: Any = None
         self.session: aiohttp.ClientSession | None = None
         self.start_task: asyncio.Task[None] | None = None
@@ -122,7 +122,6 @@ class KickGateway:
         if account:
             self.keys_by_broadcaster[account.user_id].discard(key)
         self.reflections.pop(key, None)
-        self.relay_sender_ids.pop(key, None)
 
     async def ensure_chat_subscription(self, access_token: str) -> None:
         session = await self.get_session()
@@ -168,15 +167,10 @@ class KickGateway:
         }
         sender_id = str(sender.get("user_id", ""))
         for key in tuple(self.keys_by_broadcaster.get(broadcaster_id(event), ())):
-            if sender_id and sender_id == self.relay_sender_ids.get(key):
+            if sender_id == KICK_BOT_USER_ID:
                 logging.debug("Suppressed message from StreamBridge's Kick relay account")
                 continue
             if self.reflections[key].consume("kick", str(data["chatmessage"])):
-                if sender_id:
-                    self.relay_sender_ids[key] = sender_id
-                    logging.debug(
-                        "Learned Kick relay sender identity %s for %s", sender_id, key
-                    )
                 continue
             await self.handler(key, dict(data))
         return web.Response(status=204)
