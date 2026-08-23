@@ -42,16 +42,26 @@ def dashboard_url() -> str:
     return f"{os.getenv('DASHBOARD_SITE_URL', 'https://streambridge.gozarproductions.com').rstrip('/')}/dashboard"
 
 
-def format_status(channel: str, forward: str, receive: str, session: str, ssn_state: str, ssn_targets: str, direct: str, template: str) -> str:
+def format_status(discord: str, session: str, ssn_state: str, ssn_targets: str, direct: str, template: str) -> str:
     return (
-        f"**Discord relay channel:** {channel}\n"
-        f"**Forward messages from Discord:** {forward}\n"
-        f"**Receive messages in Discord:** {receive}\n"
+        f"**Discord relay channel:** {discord}\n"
         f"**SSN session:** {session} ({ssn_state})\n"
         f"**SSN Platforms:** {ssn_targets}\n"
         f"**Direct platforms:** {direct}\n"
         f"**Direct relay message:** `{template}`"
     )
+
+
+def format_discord_status(channel_id: str | None, enabled: bool, forward: bool, receive: bool) -> str:
+    if not enabled or not channel_id or not (forward or receive):
+        return "Disabled"
+    if forward and receive:
+        direction = "forwarding/receiving"
+    elif forward:
+        direction = "forwarding only"
+    else:
+        direction = "receiving only"
+    return f"<#{channel_id}> ({direction})"
 
 
 class StreamBridge(commands.Bot):
@@ -560,9 +570,9 @@ async def status(i: discord.Interaction) -> None:
     session = c.session_id[:3] + "••••••" if c and c.session_id else "not set"
     channel_id = c.channel_ids[0] if c and c.channel_ids else c.discord_relay_channel_id if c else None
     discord_enabled = bool(bot.store.get_setting(str(i.guild_id), "discord_enabled", True))
-    channel = f"<#{channel_id}>" if discord_enabled and channel_id else "Disabled" if not discord_enabled else "none"
-    forward = "Enabled" if discord_enabled and bot.store.get_setting(str(i.guild_id), "discord_forward_enabled", True) else "Disabled"
-    receive = "Enabled" if discord_enabled and bot.store.get_setting(str(i.guild_id), "discord_receive_enabled", True) else "Disabled"
+    forward = bool(bot.store.get_setting(str(i.guild_id), "discord_forward_enabled", True))
+    receive = bool(bot.store.get_setting(str(i.guild_id), "discord_receive_enabled", True))
+    discord_status = format_discord_status(channel_id, discord_enabled, forward, receive)
     ssn_state = "connected" if i.guild_id in bot.ssn_clients and bot.ssn_clients[i.guild_id].connected else "disconnected"
     ssn_targets = ", ".join(c.relay_targets) if c and c.relay_targets else "none"
     direct_platforms = []
@@ -570,15 +580,15 @@ async def status(i: discord.Interaction) -> None:
         if platform == "twitch":
             hub = bot.direct_hubs.get(i.guild_id)
             adapter = hub.adapters.get("twitch") if hub else None
-            channel = getattr(adapter, "channel", "")
-            direct_platforms.append(f"twitch ({channel})" if channel else "twitch")
+            twitch_channel = getattr(adapter, "channel", "")
+            direct_platforms.append(f"twitch ({twitch_channel})" if twitch_channel else "twitch")
         elif platform == "youtube":
             direct_platforms.append(f"youtube ({bot.youtube.username(i.guild_id)})")
         elif platform == "kick":
             direct_platforms.append(f"kick ({bot.kick.username(i.guild_id)})")
     direct = ", ".join(direct_platforms) or "none"
     template = bot.direct_template(i.guild_id)
-    await i.response.send_message(format_status(channel, forward, receive, session, ssn_state, ssn_targets, direct, template), ephemeral=True)
+    await i.response.send_message(format_status(discord_status, session, ssn_state, ssn_targets, direct, template), ephemeral=True)
 def main() -> None:
     missing = [x for x in ("DISCORD_TOKEN", "DISCORD_CLIENT_ID") if not os.getenv(x)]
     if missing:

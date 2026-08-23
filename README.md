@@ -332,7 +332,7 @@ Shows the server’s current StreamBridge configuration.
 
 The status includes:
 
-- The shared Discord relay channel and both relay directions; the channel displays `Disabled` when Discord integration is disabled
+- The shared Discord relay channel followed by `(forwarding/receiving)`, `(forwarding only)`, or `(receiving only)`; it displays `Disabled` when Discord integration is disabled
 - Whether an SSN session is configured and connected
 - Platforms assigned to SSN
 - Directly connected platforms and accounts

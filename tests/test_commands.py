@@ -4,27 +4,31 @@ from types import SimpleNamespace
 
 os.environ.setdefault("DISCORD_CLIENT_ID", "123456789012345678")
 
-from streambridge.bot import bot, format_status, webhook_username
+from streambridge.bot import bot, format_discord_status, format_status, webhook_username
 from streambridge.relay import ReflectionTracker
 
 
 class CommandMetadataTests(unittest.TestCase):
     def test_status_labels_remain_bold(self) -> None:
-        message = format_status("#chat", "Enabled", "Disabled", "abc••••••", "connected", "twitch, youtube", "twitch (channel)", "{message}")
+        message = format_status("#chat (forwarding/receiving)", "abc••••••", "connected", "twitch, youtube", "twitch (channel)", "{message}")
 
-        self.assertIn("**Discord relay channel:** #chat", message)
-        self.assertIn("**Forward messages from Discord:** Enabled", message)
-        self.assertIn("**Receive messages in Discord:** Disabled", message)
+        self.assertIn("**Discord relay channel:** #chat (forwarding/receiving)", message)
         self.assertIn("**SSN session:**", message)
         self.assertIn("**SSN Platforms:** twitch, youtube", message)
         self.assertIn("**Direct platforms:**", message)
         self.assertIn("**Direct relay message:**", message)
 
     def test_status_displays_disabled_in_place_of_discord_channel(self) -> None:
-        message = format_status("Disabled", "Disabled", "Disabled", "not set", "disconnected", "none", "none", "{message}")
+        message = format_status("Disabled", "not set", "disconnected", "none", "none", "{message}")
 
         self.assertIn("**Discord relay channel:** Disabled", message)
         self.assertNotIn("**Discord integration:**", message)
+
+    def test_discord_status_combines_channel_and_relay_directions(self) -> None:
+        self.assertEqual(format_discord_status("123", True, True, True), "<#123> (forwarding/receiving)")
+        self.assertEqual(format_discord_status("123", True, True, False), "<#123> (forwarding only)")
+        self.assertEqual(format_discord_status("123", True, False, True), "<#123> (receiving only)")
+        self.assertEqual(format_discord_status("123", False, True, True), "Disabled")
 
     def test_webhook_username_avoids_discord_reserved_names(self) -> None:
         self.assertEqual(webhook_username("Discord Helper", "kick"), "Dis-cord Helper (Kick)")
