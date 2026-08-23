@@ -1,29 +1,37 @@
 # StreamBridge
 
-StreamBridge connects your Discord server’s conversations with livestream chats across Twitch, YouTube, Kick, and platforms supported through Social Stream Ninja.
+StreamBridge keeps livestream communities in one conversation by relaying chat between Twitch, YouTube, Kick, Discord, and platforms supported through Social Stream Ninja.
 
-Messages can travel in both directions:
+It works as a standalone streaming bridge, so a Discord server is not required. If a community also uses Discord, StreamBridge can optionally connect one Discord channel to the same conversation.
 
-- Send messages from selected Discord channels to your streaming chats.
-- Display messages from streaming platforms inside a selected Discord channel.
-- Relay messages between connected streaming platforms.
-- Use normal Discord text channels or the text chat attached to a voice channel.
+Messages can travel between every enabled destination:
+
+- Relay Twitch, YouTube, and Kick chat directly between platforms.
+- Add other platforms, including TikTok, through Social Stream Ninja.
+- Optionally send messages from Discord to streaming chats.
+- Optionally display streaming chat inside a Discord text channel or voice-channel side chat.
 
 StreamBridge can connect directly to Twitch, YouTube, and Kick. It can also integrate with Social Stream Ninja for additional platform support, including TikTok.
 
 ## Main features
 
-- **Cross-platform chat relay** — Relay messages between Discord, Twitch, YouTube, and Kick, with additional platforms such as TikTok available through Social Stream Ninja.
+- **Cross-platform chat relay** — Relay messages between Twitch, YouTube, and Kick, optionally include Discord, and reach additional platforms such as TikTok through Social Stream Ninja.
+
+- **Standalone streaming bridge** — Relay chat between streaming platforms without installing StreamBridge in a Discord server.
+
+- **Web dashboard** — Link accounts and configure the bridge from one place, whether or not Discord is enabled.
+
+- **Direct platform connections** — Connect Twitch, YouTube, and Kick directly so relay continues without a running Social Stream Ninja host.
+
+- **Social Stream Ninja integration** — Connect an SSN session for additional platforms and destinations.
+
+- **Automatic transport switching** — Prefer Social Stream Ninja when it is available and return to direct platform connections when SSN goes offline.
 
 - **Two-way Discord integration** — Send messages from Discord to streaming chats and display streaming-platform messages in Discord.
 
-- **Multiple forwarding channels** — Configure any number of Discord channels as message sources.
+- **One shared Discord relay channel** — Use one normal text channel or voice-channel side chat, with forwarding from Discord and receiving into Discord enabled independently.
 
 - **Native-looking Discord messages** — Messages received from streaming platforms use webhooks to display the chatter’s name, source platform, and profile image when available.
-
-- **Social Stream Ninja integration** — Connect StreamBridge to an SSN session for additional platforms.
-
-- **Automatic transport switching** — Prefer Social Stream Ninja when it is available and return to direct platform connections when SSN goes offline.
 
 - **Custom relay templates** — Customize direct relay messages using `{name}`, `{message}`, and `{platform}` placeholders.
 
@@ -35,28 +43,45 @@ StreamBridge can connect directly to Twitch, YouTube, and Kick. It can also inte
 
 StreamBridge can relay conversations between:
 
-- Discord
 - Twitch
 - YouTube
 - Kick
+- Discord
 - Other platforms supported by your Social Stream Ninja session
 
-When direct connections are active, messages received from one streaming platform can be forwarded to the other enabled platforms and Discord.
+When direct connections are active, messages received from one streaming platform can be forwarded to every other enabled streaming platform. Discord participates only when it has been linked and enabled for the bridge.
+
+## Getting started
+
+A typical standalone setup is managed entirely through the StreamBridge dashboard:
+
+1. Open the [StreamBridge dashboard](https://streambridge.gozarproductions.com/dashboard).
+2. Sign in with Discord, Google/YouTube, Twitch, or Kick.
+3. Link the other platform accounts the bridge should use.
+4. Enable Twitch, Kick, and/or YouTube under **Direct Connection**.
+5. Optionally connect a Social Stream Ninja session and choose its platform targets.
+6. Save the bridge.
+
+Once two or more destinations are enabled, StreamBridge can relay messages between them. Discord is optional and can be linked later without rebuilding the streaming-platform configuration.
+
+Each dashboard account has one bridge. Linked identities can be disconnected later, although another sign-in method must remain linked before the final identity can be disconnected.
+
+## Optional Discord integration
 
 ### Discord-to-stream forwarding
 
-Administrators can select one or more Discord channels whose messages should be forwarded to streaming chats.
+Administrators can select one shared Discord relay channel whose messages may be forwarded to streaming chats.
 
 Both of these channel types are supported:
 
 - Normal Discord text channels
 - Voice-channel side chats
 
-Adding a forwarding channel does not require you to receive streaming messages in that channel.
+Forwarding from Discord and receiving into Discord are independent settings. Either direction can be disabled without clearing the selected channel.
 
 ### Stream-to-Discord messages
 
-Administrators can choose a Discord channel where Twitch, YouTube, Kick, and Social Stream Ninja messages appear.
+Administrators can use the shared Discord relay channel for Twitch, YouTube, Kick, and Social Stream Ninja messages.
 
 Messages use Discord webhooks so that each message can display the original chatter’s:
 
@@ -65,9 +90,9 @@ Messages use Discord webhooks so that each message can display the original chat
 - Profile image, when available
 - Message content
 
-The receiving channel may also be one of the channels used for forwarding.
+The same saved channel is used for both directions when both are enabled.
 
-### Direct connections and SSN support
+## Direct connections and SSN support
 
 StreamBridge supports two relay methods:
 
@@ -80,7 +105,9 @@ If Social Stream Ninja becomes available, StreamBridge can switch to SSN automat
 
 StreamBridge tracks sent and received messages to prevent relayed messages from repeatedly bouncing between Discord and streaming platforms.
 
-### Discord custom emotes
+Messages posted through a user-authorized Twitch or YouTube broadcaster account are suppressed only when they match a message StreamBridge recently sent. Manually written broadcaster messages remain eligible for relay. Where a platform provides a distinct StreamBridge bot identity, such as Kick, messages from that bot identity can be suppressed directly.
+
+## Discord emote handling
 
 When Social Stream Ninja is connected, Discord custom emotes can be sent to SSN as rendered emotes.
 
@@ -96,7 +123,7 @@ becomes:
 erallieHeart
 ```
 
-### Custom relay messages
+## Custom relay messages
 
 Administrators can customize how messages appear when StreamBridge is using direct platform connections.
 
@@ -118,7 +145,7 @@ could produce:
 [Discord] Erika: Hello, everyone!
 ```
 
-## Adding StreamBridge to your server
+## Adding StreamBridge to Discord
 
 Use the official StreamBridge invitation link:
 
@@ -135,43 +162,40 @@ StreamBridge should have these permissions in the channels it uses:
 - Embed Links
 - Attach Files
 
-The **Manage Webhooks** permission is needed in the receiving channel so that streaming messages can retain their original names, platforms, and profile pictures.
+The **Manage Webhooks** permission is needed in the shared relay channel when receiving is enabled so that streaming messages can retain their original names, platforms, and profile pictures.
 
 StreamBridge’s configuration commands require the Discord **Administrator** permission.
 
-## Recommended initial setup
+### Discord setup example
 
-A typical setup takes four steps:
+After completing the dashboard setup, Discord can be added in four steps:
 
-1. Choose one or more Discord channels that send messages to streaming platforms.
-2. Choose the Discord channel that receives streaming messages.
-3. Open the StreamBridge dashboard, link your platform accounts once, and assign them to this server's bridge.
+1. Choose the shared Discord relay channel.
+2. Enable forwarding from Discord, receiving into Discord, or both.
+3. Open the StreamBridge dashboard and enable Discord for the existing bridge.
 4. Run `/status` to verify everything.
 
 For example:
 
 ```text
-/forward add channel:#stream-chat
-/receive set channel:#stream-chat
+/channel set channel:#stream-chat forward:true receive:true
 /direct setup
 /status
 ```
 
-You may use the same Discord channel for both `/forward add` and `/receive set`.
+`/channel set` selects the shared channel and configures both relay directions at once.
 
-## Commands
+## Discord commands
 
-All configuration responses and dashboard links are visible only to the administrator who ran the command.
+These commands are available only when StreamBridge is installed in a Discord server. All configuration responses and dashboard links are visible only to the administrator who ran the command. Standalone users can configure the same bridge features through the dashboard without using commands.
 
-### `/forward add`
+### `/channel set`
 
-Adds a Discord channel as a source for messages sent to streaming platforms.
+Chooses the shared Discord relay channel and configures whether messages travel from Discord, to Discord, or both.
 
 ```text
-/forward add channel:#channel
+/channel set channel:#channel forward:true receive:true
 ```
-
-You can run this command multiple times to forward more than one channel.
 
 Supported channel types:
 
@@ -181,60 +205,36 @@ Supported channel types:
 Example:
 
 ```text
-/forward add channel:#stream-chat
+/channel set channel:#stream-chat forward:true receive:true
 ```
 
-### `/forward remove`
+Parameters:
 
-Stops forwarding messages from one Discord channel.
+- `channel` — A normal text channel or voice-channel side chat.
+- `forward` — Whether Discord messages should be forwarded to enabled streaming platforms.
+- `receive` — Whether streaming-platform messages should be sent to Discord.
+
+Setting both directions to `false` saves the selected channel but leaves Discord relay disabled.
+
+### `/channel remove`
+
+Disables the Discord integration without clearing the saved channel or the saved Forward and Receive choices.
 
 ```text
-/forward remove channel:#channel
+/channel remove
 ```
 
-This does not affect other forwarding channels or messages received from streaming platforms.
-
-### `/forward clear`
-
-Removes every configured Discord forwarding channel.
-
-```text
-/forward clear
-```
-
-Afterward, streaming messages can still be received in Discord if a receiving channel is configured, but Discord messages will not be sent to the streaming platforms.
-
-### `/receive set`
-
-Chooses the Discord channel that receives messages from streaming platforms.
-
-```text
-/receive set channel:#channel
-```
-
-The selected channel may be a normal text channel or a voice-channel side chat.
-
-It may also be one of the channels configured with `/forward add`.
-
-### `/receive clear`
-
-Stops sending streaming-platform messages into Discord.
-
-```text
-/receive clear
-```
-
-This does not disable platform connections or Discord-to-platform forwarding.
+Reconfiguring the integration with `/channel set` restores it using the newly selected direction choices.
 
 ### `/direct setup`
 
-Opens the dashboard, where you can link Twitch, Google/YouTube, or Kick and choose every direct connection for this server's bridge.
+Opens the dashboard, where you can link Discord, Twitch, Google/YouTube, or Kick and choose direct connections for the bridge.
 
 ```text
 /direct setup
 ```
 
-Each platform is authorized once on its own website. The linked identity supplies the channel, posting identity, and renewable OAuth authorization.
+Each platform is authorized once on its own website. Linked identities supply the account and renewable OAuth authorization used by the bridge. Twitch and YouTube currently post through the authorized broadcaster account; Kick posts through StreamBridge's dedicated Kick bot identity.
 
 ### `/direct disable`
 
@@ -267,7 +267,7 @@ The dashboard template must contain all three placeholders.
 The default format is:
 
 ```text
-{name} said: {message}
+{name} ({platform}) said: {message}
 ```
 
 ### `/ssn connect`
@@ -332,29 +332,29 @@ Shows the server’s current StreamBridge configuration.
 
 The status includes:
 
-- Discord channels being forwarded
+- The shared Discord relay channel and enabled relay directions
 - Whether an SSN session is configured and connected
 - Platforms assigned to SSN
 - Directly connected platforms and accounts
 - The current direct relay message template
-- The Discord channel receiving platform messages
+- Whether Discord receiving is enabled
 
 The SSN session ID is masked for privacy.
 
-## Understanding forwarding and receiving
+## Understanding optional Discord forwarding and receiving
 
-Forwarding and receiving are independent.
+Forwarding and receiving are independent toggles that use the same saved Discord relay channel.
 
 ### Forwarding only
 
-If you configure `/forward add` but not `/receive set`:
+If you run `/channel set` with `forward:true` and `receive:false`:
 
 - Discord messages can be sent to streaming platforms.
 - Streaming messages will not be displayed in Discord.
 
 ### Receiving only
 
-If you configure `/receive set` but do not add forwarding channels:
+If you run `/channel set` with `forward:false` and `receive:true`:
 
 - Streaming messages can appear in Discord.
 - Discord messages will not be sent to streaming platforms.
@@ -363,9 +363,9 @@ If you configure `/receive set` but do not add forwarding channels:
 
 If you configure both:
 
-- Messages from selected Discord channels can be sent to streaming platforms.
+- Messages from the shared Discord relay channel can be sent to streaming platforms.
 - Messages from streaming platforms can appear in Discord.
-- The same Discord channel may be used for both.
+- Both directions use the same Discord channel.
 
 ## Direct mode versus Social Stream Ninja
 
@@ -388,9 +388,13 @@ When StreamBridge detects an active SSN host, it can let SSN handle the platform
 
 The exact platforms available through SSN depend on the connected Social Stream Ninja setup.
 
-## Web dashboard
+## Web dashboard and service architecture
 
-The StreamBridge dashboard is the full configuration surface. People can manage Discord forwarding and receiving channels, SSN sessions and arbitrary SSN targets, transport announcements, direct relay templates, linked direct accounts, and Discord-backed or standalone workspaces. Settings changed with Discord commands appear automatically in the open dashboard. A standalone workspace does not require StreamBridge to be installed in a Discord server.
+The StreamBridge dashboard is the full configuration surface. People can manage the shared Discord relay channel and its two direction toggles, SSN sessions and arbitrary SSN targets, transport announcements, direct relay templates, linked accounts, and a Discord-backed or standalone bridge. Each dashboard account has one bridge. Settings changed with Discord commands appear automatically in the open dashboard. A standalone bridge does not require StreamBridge to be installed in a Discord server.
+
+Linked identities can be disconnected from their account cards. Disconnecting deletes StreamBridge's stored OAuth credentials and removes direct relay assignments that depend on that identity. Disconnecting Discord disables Discord relay while preserving the saved server and channel configuration. StreamBridge requires another linked sign-in method before the final identity can be disconnected, preventing accidental dashboard lockout. Disconnecting locally does not necessarily revoke the provider's authorization; revoke it separately through the provider when desired.
+
+Discord dashboard authorization refreshes automatically when its access token expires. StreamBridge securely saves rotated tokens and briefly caches the Discord server list to reduce API calls. A reconnect request should appear only when the Discord grant has expired, been revoked, or cannot be refreshed.
 
 The public Svelte site contains no OAuth secrets. Authentication callbacks, encrypted tokens, sessions, workspace settings, and relay processes remain in this Pi-hosted StreamBridge service. Expose the existing local listener through Cloudflare Tunnel and configure:
 
@@ -411,7 +415,7 @@ Prefix each path with `DASHBOARD_API_PUBLIC_URL`. These are the only OAuth callb
 
 ## Privacy and authorization
 
-Each platform account is authorized once through the dashboard and may then be assigned to bridges owned by the same dashboard account. Discord-backed bridges can only select servers where the signed-in Discord user has the Administrator permission or is the server owner.
+Each platform account is authorized once through the dashboard and may then be assigned to the bridge owned by that dashboard account. Discord-backed bridges can only select servers where the signed-in Discord user has the Administrator permission or is the server owner.
 
 Only authorize accounts you own or are permitted to manage.
 
@@ -419,7 +423,21 @@ StreamBridge does not need your Discord, Google, YouTube, Twitch, or Kick passwo
 
 ## Troubleshooting
 
-### A command is not visible
+### Messages are not relayed between streaming platforms
+
+In the dashboard, verify:
+
+- At least two destinations are enabled.
+- The relevant Twitch, Google/YouTube, or Kick identities are linked.
+- Each desired account is enabled under **Direct Connection**, or an active SSN session is configured.
+- The authorized YouTube channel has an active livestream with live chat enabled.
+- The broadcaster account has permission to read and post chat on the relevant platform.
+
+If Social Stream Ninja is configured but offline, allow StreamBridge time to detect the unavailable host and switch to direct mode.
+
+### Discord-specific troubleshooting
+
+#### A command is not visible
 
 Make sure:
 
@@ -427,7 +445,7 @@ Make sure:
 - You have the Discord Administrator permission.
 - Discord has finished synchronizing the bot’s commands.
 
-### StreamBridge cannot post in a channel
+#### StreamBridge cannot post in a channel
 
 Check that it has:
 
@@ -441,7 +459,7 @@ For messages received from platforms, also grant:
 - Embed Links
 - Attach Files
 
-### Streaming messages do not appear in Discord
+#### Streaming messages do not appear in Discord
 
 Run:
 
@@ -451,16 +469,17 @@ Run:
 
 Then verify:
 
-- A receiving channel is shown.
+- A shared Discord relay channel is shown and receiving is enabled.
 - The desired direct platform is connected, or SSN is connected.
-- StreamBridge has permission to view and post in the receiving channel.
+- StreamBridge has permission to view and post in the shared relay channel.
 - StreamBridge has permission to manage webhooks there.
 
-### Discord messages are not sent to streaming platforms
+#### Discord messages are not sent to streaming platforms
 
 Verify:
 
-- The Discord channel was added with `/forward add`.
+- Forwarding was enabled with `/channel set` or in the dashboard.
+- The message was sent in the saved shared Discord relay channel.
 - At least one direct platform is connected, or SSN is connected.
 - The message was not sent by another bot or by StreamBridge’s own webhook.
 - StreamBridge can read the channel.
@@ -474,6 +493,12 @@ The authorized YouTube channel must have an active livestream with live chat ena
 Sign out of that platform in your browser, open a private/incognito window, sign into the intended broadcaster account, and link it again from the dashboard.
 
 ## Support
+
+Visit the [StreamBridge support page](https://streambridge.gozarproductions.com/support) for help and feedback options.
+
+Report reproducible bugs and request features through [StreamBridge GitHub Issues](https://github.com/Erallie/stream-bridge/issues).
+
+For setup assistance, troubleshooting, and additional support, join the [Gozar Productions Discord](https://discord.gozarproductions.com).
 
 If you encounter a problem, include the following when requesting help:
 

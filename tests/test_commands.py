@@ -90,6 +90,20 @@ class CommandMetadataTests(unittest.TestCase):
         self.assertEqual({command.name for command in direct.commands}, {"setup", "disable", "message"})
         self.assertTrue(all(command.parameters == [] for command in direct.commands))
 
+    def test_channel_commands_replace_forward_and_receive_groups(self) -> None:
+        commands = {command.name: command for command in bot.tree.get_commands()}
+
+        self.assertNotIn("forward", commands)
+        self.assertNotIn("receive", commands)
+        self.assertIn("channel", commands)
+        self.assertEqual({command.name for command in commands["channel"].commands}, {"set", "remove"})
+
+        set_command = next(command for command in commands["channel"].commands if command.name == "set")
+        self.assertEqual(
+            [parameter.name for parameter in set_command.parameters],
+            ["channel", "forward", "receive"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
