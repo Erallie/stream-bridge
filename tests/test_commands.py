@@ -10,14 +10,21 @@ from streambridge.relay import ReflectionTracker
 
 class CommandMetadataTests(unittest.TestCase):
     def test_status_labels_remain_bold(self) -> None:
-        message = format_status("#chat", "abc••••••", "connected", "twitch, youtube", "twitch (channel)", "{message}", "#relay")
+        message = format_status("#chat", "Enabled", "Disabled", "abc••••••", "connected", "twitch, youtube", "twitch (channel)", "{message}")
 
-        self.assertIn("**Discord channels forwarded:**", message)
+        self.assertIn("**Discord relay channel:** #chat", message)
+        self.assertIn("**Forward messages from Discord:** Enabled", message)
+        self.assertIn("**Receive messages in Discord:** Disabled", message)
         self.assertIn("**SSN session:**", message)
         self.assertIn("**SSN Platforms:** twitch, youtube", message)
         self.assertIn("**Direct platforms:**", message)
         self.assertIn("**Direct relay message:**", message)
-        self.assertIn("**Platform messages received in Discord:**", message)
+
+    def test_status_displays_disabled_in_place_of_discord_channel(self) -> None:
+        message = format_status("Disabled", "Disabled", "Disabled", "not set", "disconnected", "none", "none", "{message}")
+
+        self.assertIn("**Discord relay channel:** Disabled", message)
+        self.assertNotIn("**Discord integration:**", message)
 
     def test_webhook_username_avoids_discord_reserved_names(self) -> None:
         self.assertEqual(webhook_username("Discord Helper", "kick"), "Dis-cord Helper (Kick)")

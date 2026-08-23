@@ -332,12 +332,11 @@ Shows the server’s current StreamBridge configuration.
 
 The status includes:
 
-- The shared Discord relay channel and enabled relay directions
+- The shared Discord relay channel and both relay directions; the channel displays `Disabled` when Discord integration is disabled
 - Whether an SSN session is configured and connected
 - Platforms assigned to SSN
 - Directly connected platforms and accounts
 - The current direct relay message template
-- Whether Discord receiving is enabled
 
 The SSN session ID is masked for privacy.
 
@@ -382,7 +381,11 @@ Direct mode continues working even when the computer running Social Stream Ninja
 - Twitch
 - YouTube
 - Kick
-- Other platforms supported by the connected SSN session
+- TikTok
+- Facebook
+- Instragram
+- X/Twitter
+- Many more that I don't even recognize
 
 When StreamBridge detects an active SSN host, it can let SSN handle the platform relay. When the SSN host stops responding, StreamBridge returns to direct mode.
 
@@ -390,7 +393,7 @@ The exact platforms available through SSN depend on the connected Social Stream 
 
 ## Web dashboard and service architecture
 
-The StreamBridge dashboard is the full configuration surface. People can manage the shared Discord relay channel and its two direction toggles, SSN sessions and arbitrary SSN targets, transport announcements, direct relay templates, linked accounts, and a Discord-backed or standalone bridge. Each dashboard account has one bridge. Settings changed with Discord commands appear automatically in the open dashboard. A standalone bridge does not require StreamBridge to be installed in a Discord server.
+The StreamBridge dashboard is the full configuration surface. People can manage the shared Discord relay channel and its two direction toggles, SSN sessions and arbitrary SSN targets, transport announcements, direct relay templates, linked accounts, and a Discord-backed or standalone bridge. Settings changed with Discord commands appear automatically in the open dashboard. A standalone bridge does not require StreamBridge to be installed in a Discord server.
 
 Linked identities can be disconnected from their account cards. Disconnecting deletes StreamBridge's stored OAuth credentials and removes direct relay assignments that depend on that identity. Disconnecting Discord disables Discord relay while preserving the saved server and channel configuration. StreamBridge requires another linked sign-in method before the final identity can be disconnected, preventing accidental dashboard lockout. Disconnecting locally does not necessarily revoke the provider's authorization; revoke it separately through the provider when desired.
 
