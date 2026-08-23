@@ -107,21 +107,13 @@ StreamBridge tracks sent and received messages to prevent relayed messages from 
 
 Messages posted through a user-authorized Twitch or YouTube broadcaster account are suppressed only when they match a message StreamBridge recently sent. Manually written broadcaster messages remain eligible for relay. Where a platform provides a distinct StreamBridge bot identity, such as Kick, messages from that bot identity can be suppressed directly.
 
-## Discord emote handling
+## Discord custom emotes
 
-When Social Stream Ninja is connected, Discord custom emotes can be sent to SSN as rendered emotes.
+StreamBridge supports relaying Discord custom emotes across connected chats so they can remain recognizable when messages move between Discord and streaming platforms.
 
-When StreamBridge uses direct platform connections, Discord custom emotes are converted into readable names. For example:
+Custom emotes are preserved in a form that allows connected platforms and chat integrations to display them appropriately instead of showing Discord’s raw internal emote syntax.
 
-```text
-<:erallieHeart:1529884213434777742>
-```
-
-becomes:
-
-```text
-erallieHeart
-```
+This helps Discord messages look more natural when they are relayed into Twitch, YouTube, Kick, and other supported chats.
 
 ## Custom relay messages
 
