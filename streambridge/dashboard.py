@@ -180,13 +180,7 @@ class DashboardAPI:
             )
             if not identity:
                 return web.json_response({"ok": True, "affected_workspace_ids": []})
-            if len(identities) <= 1:
-                raise web.HTTPConflict(
-                    text=json.dumps({
-                        "error": "Link another account before disconnecting your only sign-in method"
-                    }),
-                    content_type="application/json",
-                )
+            delete_account = len(identities) == 1
             try:
                 await self.revoke_identity(provider, identity)
             except OAuthRevocationError:
@@ -203,9 +197,12 @@ class DashboardAPI:
                 )
             try:
                 with self.store.transaction():
-                    affected_workspace_ids = self.store.unlink_dashboard_identity(
-                        user_id, provider
-                    )
+                    if delete_account:
+                        affected_workspace_ids = self.store.delete_dashboard_user(user_id)
+                    else:
+                        affected_workspace_ids = self.store.unlink_dashboard_identity(
+                            user_id, provider
+                        )
             except ValueError as error:
                 raise web.HTTPConflict(
                     text=json.dumps({"error": str(error)}),
@@ -215,9 +212,14 @@ class DashboardAPI:
             self.discord_guild_cache.pop(user_id, None)
         for workspace_id in affected_workspace_ids:
             await self.changed(workspace_id)
-        return web.json_response(
-            {"ok": True, "affected_workspace_ids": affected_workspace_ids}
-        )
+        response = web.json_response({
+            "ok": True,
+            "account_deleted": delete_account,
+            "affected_workspace_ids": affected_workspace_ids,
+        })
+        if delete_account:
+            response.del_cookie(self.cookie_name, path="/")
+        return response
 
     async def revoke_identity(self, provider: str, identity: dict[str, Any]) -> None:
         """Revoke a provider grant before deleting StreamBridge's stored credentials."""

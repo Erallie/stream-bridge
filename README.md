@@ -64,7 +64,7 @@ A typical standalone setup is managed entirely through the StreamBridge dashboar
 
 Once two or more destinations are enabled, StreamBridge can relay messages between them. Discord is optional and can be linked later without rebuilding the streaming-platform configuration.
 
-Each dashboard account has one bridge. Linked identities can be disconnected later, although another sign-in method must remain linked before the final identity can be disconnected.
+Each dashboard account has one bridge. Linked identities can be disconnected later. Disconnecting the final linked identity permanently deletes the StreamBridge account and all of its saved data after confirmation.
 
 ## Optional Discord integration
 
@@ -416,7 +416,7 @@ Press **Save** after making configuration changes. Changes made through Discord 
 
 Use the **Disconnect** button beside a linked account to revoke StreamBridge's OAuth authorization at that provider and delete the locally stored identity and encrypted credentials. Any direct connection that depends on that account will stop working until an account is linked again.
 
-You must keep at least one sign-in method connected so you do not lock yourself out of the dashboard. Disconnecting Discord disables Discord relay but retains the selected server, channel, and relay-direction settings for later use.
+When other sign-in methods remain, disconnecting Discord disables Discord relay but retains the selected server, channel, and relay-direction settings for later use. Disconnecting the final linked identity instead permanently deletes the StreamBridge account, all linked identities and credentials, sessions, bridge settings, connection assignments, Discord relay configuration, and relay history.
 
 If the provider cannot confirm revocation, StreamBridge keeps the connection and displays an error so the user can retry. Users may also review or revoke StreamBridge through the provider's account settings. Disconnecting Discord revokes the signed-in user's OAuth grant but does not remove the separately installed Discord bot from a server.
 

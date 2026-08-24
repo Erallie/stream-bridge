@@ -475,6 +475,38 @@ class ConfigStore:
         )
         return sorted(affected_workspace_ids)
 
+    def delete_dashboard_user(self, user_id: str) -> list[str]:
+        """Delete a dashboard account and every configuration record it owns.
+
+        The caller must wrap this operation in ``transaction()``.
+        """
+        workspace_rows = self.connection.execute(
+            "SELECT id, discord_guild_id FROM bridge_workspaces WHERE owner_user_id=?",
+            (user_id,),
+        ).fetchall()
+        workspace_ids = [str(row["id"]) for row in workspace_rows]
+        guild_ids = {
+            str(row["discord_guild_id"])
+            for row in workspace_rows
+            if row["discord_guild_id"]
+        }
+        history_keys = guild_ids | {f"workspace:{workspace_id}" for workspace_id in workspace_ids}
+
+        for guild_id in guild_ids:
+            self.connection.execute("DELETE FROM guild_channels WHERE guild_id=?", (guild_id,))
+            self.connection.execute("DELETE FROM guild_settings WHERE guild_id=?", (guild_id,))
+            self.connection.execute("DELETE FROM guild_config WHERE guild_id=?", (guild_id,))
+        for history_key in history_keys:
+            self.connection.execute("DELETE FROM processed_events WHERE guild_id=?", (history_key,))
+            self.connection.execute("DELETE FROM deliveries WHERE guild_id=?", (history_key,))
+
+        self.connection.execute(
+            "DELETE FROM dashboard_oauth_states WHERE user_id=?",
+            (user_id,),
+        )
+        self.connection.execute("DELETE FROM dashboard_users WHERE id=?", (user_id,))
+        return workspace_ids
+
     def update_dashboard_refresh_token(self, provider: str, provider_user_id: str, encrypted_token: str) -> None:
         self.connection.execute(
             "UPDATE dashboard_identities SET refresh_token=?, updated_at=? WHERE provider=? AND provider_user_id=?",

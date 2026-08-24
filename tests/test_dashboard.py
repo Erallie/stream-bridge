@@ -233,6 +233,69 @@ class DashboardTests(unittest.TestCase):
             {"google", "twitch"},
         )
 
+    def test_disconnecting_final_identity_deletes_account_and_bridge_data(self) -> None:
+        user_id = self.store.create_dashboard_user()
+        self.store.save_dashboard_identity(
+            user_id,
+            {
+                "provider": "google",
+                "provider_user_id": "google-1",
+                "display_name": "YouTube channel",
+            },
+        )
+        workspace_id = self.store.save_workspace(
+            user_id,
+            {
+                "discord_guild_id": "guild-1",
+                "ssn_targets": ["youtube"],
+                "relay_template": "{name}: {message} (from {platform})",
+            },
+        )
+        self.store.add_channel("guild-1", "channel-1")
+        self.store.set_settings(
+            "guild-1",
+            {"discord_relay_channel_id": "channel-1", "discord_enabled": True},
+        )
+        self.store.connection.execute(
+            "INSERT INTO dashboard_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+            ("session-1", user_id, 9999999999, 1),
+        )
+        self.store.connection.execute(
+            "INSERT INTO dashboard_oauth_states (state, provider, mode, user_id, return_to, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("state-1", "google", "link", user_id, "/dashboard", 9999999999),
+        )
+        self.store.connection.commit()
+
+        dashboard = DashboardAPI(self.store)
+        dashboard.require_user = Mock(return_value=user_id)
+        dashboard.revoke_identity = AsyncMock()
+        dashboard.on_workspace_changed = AsyncMock()
+        request = Mock()
+        request.match_info = {"provider": "google"}
+
+        response = asyncio.run(dashboard.disconnect_identity(request))
+
+        dashboard.revoke_identity.assert_awaited_once()
+        dashboard.on_workspace_changed.assert_awaited_once_with(workspace_id)
+        self.assertIn('"account_deleted": true', response.text)
+        self.assertIsNone(
+            self.store.connection.execute(
+                "SELECT id FROM dashboard_users WHERE id=?", (user_id,)
+            ).fetchone()
+        )
+        self.assertEqual(self.store.workspaces(user_id), [])
+        self.assertIsNone(self.store.get("guild-1"))
+        self.assertIsNone(
+            self.store.connection.execute(
+                "SELECT token_hash FROM dashboard_sessions WHERE user_id=?", (user_id,)
+            ).fetchone()
+        )
+        self.assertIsNone(
+            self.store.connection.execute(
+                "SELECT state FROM dashboard_oauth_states WHERE user_id=?", (user_id,)
+            ).fetchone()
+        )
+
     def test_each_provider_uses_its_revocation_endpoint(self) -> None:
         class Response:
             status = 200
