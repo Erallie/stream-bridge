@@ -24,6 +24,10 @@ DiscordChannels = Callable[[str], Awaitable[list[dict[str, str]]]]
 RuntimeStatus = Callable[[str], Awaitable[dict[str, Any]]]
 
 
+class OAuthRevocationError(RuntimeError):
+    """A provider could not confirm that its OAuth grant was revoked."""
+
+
 def iso_after(**kwargs: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(**kwargs)).isoformat()
 
@@ -55,6 +59,7 @@ class DashboardAPI:
         self.session: aiohttp.ClientSession | None = None
         self.discord_guild_cache: dict[str, tuple[float, list[dict[str, str]]]] = {}
         self.discord_refresh_locks: dict[str, asyncio.Lock] = {}
+        self.identity_disconnect_locks: dict[str, asyncio.Lock] = {}
         key = os.getenv("TOKEN_ENCRYPTION_KEY", "")
         self.fernet = Fernet(key.encode()) if key else None
 
@@ -166,16 +171,46 @@ class DashboardAPI:
                 text=json.dumps({"error": "Unsupported provider"}),
                 content_type="application/json",
             )
-        try:
-            with self.store.transaction():
-                affected_workspace_ids = self.store.unlink_dashboard_identity(
-                    user_id, provider
-                )
-        except ValueError as error:
-            raise web.HTTPConflict(
-                text=json.dumps({"error": str(error)}),
-                content_type="application/json",
+        lock = self.identity_disconnect_locks.setdefault(user_id, asyncio.Lock())
+        async with lock:
+            identities = self.store.dashboard_identities(user_id, include_tokens=True)
+            identity = next(
+                (item for item in identities if item["provider"] == provider),
+                None,
             )
+            if not identity:
+                return web.json_response({"ok": True, "affected_workspace_ids": []})
+            if len(identities) <= 1:
+                raise web.HTTPConflict(
+                    text=json.dumps({
+                        "error": "Link another account before disconnecting your only sign-in method"
+                    }),
+                    content_type="application/json",
+                )
+            try:
+                await self.revoke_identity(provider, identity)
+            except OAuthRevocationError:
+                logging.exception("Failed to revoke %s OAuth authorization", provider)
+                raise web.HTTPBadGateway(
+                    text=json.dumps({
+                        "error": (
+                            f"{'YouTube' if provider == 'google' else provider.title()} "
+                            "could not confirm that access was revoked. "
+                            "Nothing was disconnected; please try again."
+                        )
+                    }),
+                    content_type="application/json",
+                )
+            try:
+                with self.store.transaction():
+                    affected_workspace_ids = self.store.unlink_dashboard_identity(
+                        user_id, provider
+                    )
+            except ValueError as error:
+                raise web.HTTPConflict(
+                    text=json.dumps({"error": str(error)}),
+                    content_type="application/json",
+                )
         if provider == "discord":
             self.discord_guild_cache.pop(user_id, None)
         for workspace_id in affected_workspace_ids:
@@ -183,6 +218,101 @@ class DashboardAPI:
         return web.json_response(
             {"ok": True, "affected_workspace_ids": affected_workspace_ids}
         )
+
+    async def revoke_identity(self, provider: str, identity: dict[str, Any]) -> None:
+        """Revoke a provider grant before deleting StreamBridge's stored credentials."""
+        access_token = self.decrypt(str(identity.get("access_token", "")))
+        refresh_token = self.decrypt(str(identity.get("refresh_token", "")))
+        if not access_token and not refresh_token:
+            return
+
+        session = await self.http()
+        if provider == "discord":
+            client_id = os.getenv("DISCORD_CLIENT_ID", "")
+            client_secret = os.getenv("DISCORD_CLIENT_SECRET", "")
+            if not client_id or not client_secret:
+                raise OAuthRevocationError("Discord OAuth revocation is not configured")
+            token = refresh_token or access_token
+            hint = "refresh_token" if refresh_token else "access_token"
+            credentials = base64.b64encode(
+                f"{client_id}:{client_secret}".encode()
+            ).decode()
+            async with session.post(
+                "https://discord.com/api/v10/oauth2/token/revoke",
+                data={"token": token, "token_type_hint": hint},
+                headers={"Authorization": f"Basic {credentials}"},
+            ) as response:
+                await self.require_revocation_success(provider, response)
+            return
+
+        if provider == "google":
+            token = refresh_token or access_token
+            async with session.post(
+                "https://oauth2.googleapis.com/revoke",
+                data={"token": token},
+            ) as response:
+                await self.require_revocation_success(provider, response)
+            return
+
+        if provider == "twitch":
+            client_id = os.getenv("TWITCH_CLIENT_ID", "")
+            if not client_id:
+                raise OAuthRevocationError("Twitch OAuth revocation is not configured")
+            token = access_token or refresh_token
+            async with session.post(
+                "https://id.twitch.tv/oauth2/revoke",
+                data={"client_id": client_id, "token": token},
+            ) as response:
+                await self.require_revocation_success(provider, response)
+            return
+
+        if provider == "kick":
+            tokens = [
+                (access_token, "access_token"),
+                (refresh_token, "refresh_token"),
+            ]
+            failures: list[str] = []
+            successes = 0
+            for token, hint in tokens:
+                if not token:
+                    continue
+                async with session.post(
+                    "https://id.kick.com/oauth/revoke",
+                    params={"token": token, "token_hint_type": hint},
+                ) as response:
+                    body = await response.text()
+                    if self.revocation_succeeded(response.status, body):
+                        successes += 1
+                    else:
+                        failures.append(f"HTTP {response.status}")
+            if failures and not successes:
+                raise OAuthRevocationError(
+                    f"Kick OAuth revocation failed: {', '.join(failures)}"
+                )
+            return
+
+        raise OAuthRevocationError(f"Unsupported OAuth provider: {provider}")
+
+    @staticmethod
+    def revocation_succeeded(status: int, body: str) -> bool:
+        if 200 <= status < 300:
+            return True
+        normalized = body.lower().replace("_", " ")
+        return status == 400 and any(
+            marker in normalized
+            for marker in ("invalid token", "already revoked", "token revoked")
+        )
+
+    async def require_revocation_success(
+        self,
+        provider: str,
+        response: aiohttp.ClientResponse,
+    ) -> None:
+        body = await response.text()
+        if not self.revocation_succeeded(response.status, body):
+            raise OAuthRevocationError(
+                f"{provider.title()} OAuth revocation failed: HTTP {response.status}"
+            )
 
     async def list_workspaces(self, request: web.Request) -> web.Response:
         user_id = self.require_user(request)

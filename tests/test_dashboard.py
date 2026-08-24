@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from cryptography.fernet import Fernet
 
-from streambridge.dashboard import DashboardAPI
+from aiohttp import web
+
+from streambridge.dashboard import DashboardAPI, OAuthRevocationError
 from streambridge.database import ConfigStore
 
 
@@ -177,6 +179,112 @@ class DashboardTests(unittest.TestCase):
             ["google"],
         )
         self.assertEqual(self.store.workspaces(user_id)[0]["connections"], [])
+
+    def test_disconnect_revokes_authorization_before_removing_identity(self) -> None:
+        user_id = self.store.create_dashboard_user()
+        for provider in ("google", "twitch"):
+            self.store.save_dashboard_identity(
+                user_id,
+                {
+                    "provider": provider,
+                    "provider_user_id": f"{provider}-1",
+                    "display_name": provider.title(),
+                },
+            )
+        dashboard = DashboardAPI(self.store)
+        dashboard.require_user = Mock(return_value=user_id)
+        dashboard.revoke_identity = AsyncMock()
+        request = Mock()
+        request.match_info = {"provider": "twitch"}
+
+        asyncio.run(dashboard.disconnect_identity(request))
+
+        dashboard.revoke_identity.assert_awaited_once()
+        self.assertEqual(
+            [identity["provider"] for identity in self.store.dashboard_identities(user_id)],
+            ["google"],
+        )
+
+    def test_failed_revocation_preserves_identity(self) -> None:
+        user_id = self.store.create_dashboard_user()
+        for provider in ("google", "twitch"):
+            self.store.save_dashboard_identity(
+                user_id,
+                {
+                    "provider": provider,
+                    "provider_user_id": f"{provider}-1",
+                    "display_name": provider.title(),
+                },
+            )
+        dashboard = DashboardAPI(self.store)
+        dashboard.require_user = Mock(return_value=user_id)
+        dashboard.revoke_identity = AsyncMock(
+            side_effect=OAuthRevocationError("provider unavailable")
+        )
+        request = Mock()
+        request.match_info = {"provider": "twitch"}
+
+        with patch("streambridge.dashboard.logging.exception"):
+            with self.assertRaises(web.HTTPBadGateway):
+                asyncio.run(dashboard.disconnect_identity(request))
+
+        self.assertEqual(
+            {identity["provider"] for identity in self.store.dashboard_identities(user_id)},
+            {"google", "twitch"},
+        )
+
+    def test_each_provider_uses_its_revocation_endpoint(self) -> None:
+        class Response:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                return False
+
+            async def text(self):
+                return "OK"
+
+        class Session:
+            def __init__(self):
+                self.calls = []
+
+            def post(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return Response()
+
+        key = Fernet.generate_key().decode()
+        with patch.dict(
+            "os.environ",
+            {
+                "TOKEN_ENCRYPTION_KEY": key,
+                "DISCORD_CLIENT_ID": "discord-client",
+                "DISCORD_CLIENT_SECRET": "discord-secret",
+                "TWITCH_CLIENT_ID": "twitch-client",
+            },
+        ):
+            dashboard = DashboardAPI(self.store)
+            session = Session()
+            dashboard.http = AsyncMock(return_value=session)
+            identity = {
+                "access_token": dashboard.encrypt("access-token"),
+                "refresh_token": dashboard.encrypt("refresh-token"),
+            }
+
+            for provider in ("discord", "google", "twitch", "kick"):
+                asyncio.run(dashboard.revoke_identity(provider, identity))
+
+        self.assertEqual(
+            [call[0] for call in session.calls],
+            [
+                "https://discord.com/api/v10/oauth2/token/revoke",
+                "https://oauth2.googleapis.com/revoke",
+                "https://id.twitch.tv/oauth2/revoke",
+                "https://id.kick.com/oauth/revoke",
+                "https://id.kick.com/oauth/revoke",
+            ],
+        )
 
     def test_only_sign_in_identity_cannot_be_disconnected(self) -> None:
         user_id = self.store.create_dashboard_user()

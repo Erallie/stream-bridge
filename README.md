@@ -414,11 +414,11 @@ Press **Save** after making configuration changes. Changes made through Discord 
 
 ### Disconnecting an account
 
-Use the **Disconnect** button beside a linked account to remove it from StreamBridge. Any direct connection that depends on that account will stop working until an account is linked again.
+Use the **Disconnect** button beside a linked account to revoke StreamBridge's OAuth authorization at that provider and delete the locally stored identity and encrypted credentials. Any direct connection that depends on that account will stop working until an account is linked again.
 
 You must keep at least one sign-in method connected so you do not lock yourself out of the dashboard. Disconnecting Discord disables Discord relay but retains the selected server, channel, and relay-direction settings for later use.
 
-Disconnecting an account from StreamBridge removes its saved authorization from StreamBridge, but it may not revoke permission at the platform itself. You can separately revoke StreamBridge through that platform's account settings if desired.
+If the provider cannot confirm revocation, StreamBridge keeps the connection and displays an error so the user can retry. Users may also review or revoke StreamBridge through the provider's account settings. Disconnecting Discord revokes the signed-in user's OAuth grant but does not remove the separately installed Discord bot from a server.
 
 ## Privacy and authorization
 
