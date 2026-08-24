@@ -272,6 +272,20 @@ The default format is:
 {name}: {message} (from {platform})
 ```
 
+### `/direct youtubenotif`
+
+Enables or disables the message posted in the configured Discord relay channel when StreamBridge detects a new active YouTube live broadcast. Notifications are enabled by default.
+
+```text
+/direct youtubenotif enabled:false
+```
+
+When enabled, StreamBridge posts this once after detecting each new broadcast:
+
+```text
+-# YouTube live broadcast detected. Messages will now be relayed.
+```
+
 ### `/ssn connect`
 
 Connects the Discord server to a Social Stream Ninja session.

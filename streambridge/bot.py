@@ -198,7 +198,13 @@ class StreamBridge(commands.Bot):
                         await self.handle_direct(key, data)
                     else:
                         await self.handle_workspace_direct(workspace, data)
-            hub = DirectHub(received, twitch_channel, self.youtube.token(key), twitch_oauth, twitch_username)
+            async def youtube_broadcast_detected() -> None:
+                if isinstance(key, int):
+                    await self.announce_youtube_broadcast(key)
+            hub = DirectHub(
+                received, twitch_channel, self.youtube.token(key), twitch_oauth,
+                twitch_username, youtube_broadcast_detected,
+            )
             self.direct_hubs[key] = hub
             hub.start()
 
@@ -333,6 +339,26 @@ class StreamBridge(commands.Bot):
         if self.kick.connected(guild_id):
             platforms.append("kick")
         return platforms
+
+    async def announce_youtube_broadcast(self, guild_id: int) -> None:
+        if not self.store.get_setting(str(guild_id), "youtube_live_notifications", True):
+            return
+        if not self.store.get_setting(str(guild_id), "discord_enabled", True):
+            return
+        config = self.store.get(str(guild_id))
+        if not config or not config.discord_relay_channel_id:
+            return
+        guild = self.get_guild(guild_id)
+        channel = guild.get_channel(int(config.discord_relay_channel_id)) if guild else None
+        if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
+            return
+        try:
+            await channel.send(
+                "-# YouTube live broadcast detected. Messages will now be relayed.",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.HTTPException:
+            logging.exception("Could not announce the detected YouTube broadcast in %s", channel.id)
 
     async def transport_status(self, guild_id: int, connected: bool) -> None:
         if not self.store.get_setting(str(guild_id), "transport_announcements", True):
@@ -630,6 +656,18 @@ async def direct_message(i: discord.Interaction, template: str = "") -> None:
     )
     await i.response.send_message(
         f"Direct relay message saved. Example:\n{example}",
+        ephemeral=True,
+    )
+
+
+@direct_group.command(name="youtubenotif", description="Enable or disable YouTube live-broadcast notifications")
+@app_commands.describe(enabled="Whether the bot posts when it detects an active YouTube live broadcast")
+async def direct_youtube_notifications(i: discord.Interaction, enabled: bool) -> None:
+    assert i.guild_id
+    bot.store.set_setting(str(i.guild_id), "youtube_live_notifications", enabled)
+    state = "enabled" if enabled else "disabled"
+    await i.response.send_message(
+        f"YouTube live-broadcast notifications {state}.",
         ephemeral=True,
     )
 

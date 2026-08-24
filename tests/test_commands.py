@@ -83,7 +83,10 @@ class CommandMetadataTests(unittest.TestCase):
 
         self.assertNotIn("template", names)
         self.assertIn("message", direct_names)
-        self.assertEqual(direct_names, {"setup", "enable", "disable", "message"})
+        self.assertEqual(
+            direct_names,
+            {"setup", "enable", "disable", "message", "youtubenotif"},
+        )
         message = next(command for command in direct.commands if command.name == "message")
         self.assertEqual([parameter.name for parameter in message.parameters], ["template"])
 
@@ -103,7 +106,10 @@ class CommandMetadataTests(unittest.TestCase):
 
     def test_only_direct_setup_opens_the_dashboard(self) -> None:
         direct = next(command for command in bot.tree.get_commands() if command.name == "direct")
-        self.assertEqual({command.name for command in direct.commands}, {"setup", "enable", "disable", "message"})
+        self.assertEqual(
+            {command.name for command in direct.commands},
+            {"setup", "enable", "disable", "message", "youtubenotif"},
+        )
         parameters = {
             command.name: [parameter.name for parameter in command.parameters]
             for command in direct.commands
@@ -112,6 +118,7 @@ class CommandMetadataTests(unittest.TestCase):
         self.assertEqual(parameters["enable"], ["platform"])
         self.assertEqual(parameters["disable"], ["platform"])
         self.assertEqual(parameters["message"], ["template"])
+        self.assertEqual(parameters["youtubenotif"], ["enabled"])
 
     def test_channel_commands_replace_forward_and_receive_groups(self) -> None:
         commands = {command.name: command for command in bot.tree.get_commands()}

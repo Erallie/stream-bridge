@@ -15,6 +15,7 @@ from streambridge.oauth import OAuthToken
 from streambridge.relay import ReflectionTracker
 
 Handler = Callable[[dict[str, Any]], Awaitable[None]]
+BroadcastHandler = Callable[[], Awaitable[None]]
 
 
 def youtube_error_reasons(body: Any) -> set[str]:
@@ -163,12 +164,14 @@ class TwitchAdapter:
 
 
 class YouTubeAdapter:
-    def __init__(self, handler: Handler, oauth: OAuthToken) -> None:
+    def __init__(self, handler: Handler, oauth: OAuthToken,
+                 on_broadcast_detected: BroadcastHandler | None = None) -> None:
         self.live_chat_id = ""
         self.handler = handler
         self.task: asyncio.Task[None] | None = None
         self.page_token = ""
         self.oauth = oauth
+        self.on_broadcast_detected = on_broadcast_detected
         self.session: aiohttp.ClientSession | None = None
         self.waiting_for_broadcast = False
         try:
@@ -211,7 +214,14 @@ class YouTubeAdapter:
                 if live_chat_id != self.live_chat_id:
                     self.page_token = ""
                     logging.info("Direct YouTube found the active livestream chat")
-                self.live_chat_id = live_chat_id
+                    self.live_chat_id = live_chat_id
+                    if self.on_broadcast_detected:
+                        try:
+                            await self.on_broadcast_detected()
+                        except Exception:
+                            logging.exception("Could not announce the detected YouTube broadcast")
+                else:
+                    self.live_chat_id = live_chat_id
                 self.waiting_for_broadcast = False
                 return live_chat_id
         self.live_chat_id = ""
@@ -286,7 +296,8 @@ class YouTubeAdapter:
 
 class DirectHub:
     def __init__(self, handler: Handler, twitch_channel: str = "", youtube_oauth: OAuthToken | None = None,
-                 twitch_oauth: OAuthToken | None = None, twitch_username: str = "") -> None:
+                 twitch_oauth: OAuthToken | None = None, twitch_username: str = "",
+                 on_youtube_broadcast_detected: BroadcastHandler | None = None) -> None:
         self.adapters: dict[str, Any] = {}
         self.reflections = ReflectionTracker()
 
@@ -301,7 +312,9 @@ class DirectHub:
         if twitch_channel and twitch_oauth:
             self.adapters["twitch"] = TwitchAdapter(twitch_channel, platform_handler("twitch"), twitch_oauth, twitch_username)
         if youtube_oauth:
-            self.adapters["youtube"] = YouTubeAdapter(platform_handler("youtube"), youtube_oauth)
+            self.adapters["youtube"] = YouTubeAdapter(
+                platform_handler("youtube"), youtube_oauth, on_youtube_broadcast_detected
+            )
 
     def start(self) -> None:
         for adapter in self.adapters.values():

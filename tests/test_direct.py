@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from streambridge.direct import DirectHub, TwitchAdapter, YouTubeAdapter, youtube_error_reasons
 from streambridge.kick import broadcaster_id, kick_chat_payload
@@ -27,6 +27,27 @@ class DirectAdapterTests(unittest.TestCase):
 
         asyncio.run(exercise())
         self.assertEqual(received[0]["chatimg"], "https://example.test/alex.png")
+
+    def test_youtube_announces_each_new_broadcast_once(self) -> None:
+        async def handler(payload):
+            pass
+
+        async def exercise() -> None:
+            detected = AsyncMock()
+            adapter = YouTubeAdapter(handler, Mock(), detected)
+            chats = iter(("first-chat", "first-chat", "second-chat"))
+
+            async def request(session, method, url, **kwargs):
+                return 200, {"items": [{"snippet": {"liveChatId": next(chats)}}]}
+
+            adapter.request = request
+            adapter.get_session = lambda: asyncio.sleep(0, result=object())
+            await adapter.discover_live_chat()
+            await adapter.discover_live_chat()
+            await adapter.discover_live_chat()
+            self.assertEqual(detected.await_count, 2)
+
+        asyncio.run(exercise())
 
     def test_twitch_broadcaster_messages_are_not_suppressed(self) -> None:
         received = []
