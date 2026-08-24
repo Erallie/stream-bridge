@@ -262,7 +262,8 @@ class YouTubeAdapter:
         snippet, author = item.get("snippet", {}), item.get("authorDetails", {})
         if snippet.get("type") != "textMessageEvent":
             return
-        await self.handler({"type": "youtube", "id": item.get("id", ""), "userid": author.get("channelId", ""), "chatname": author.get("displayName", ""), "username": author.get("displayName", ""), "chatmessage": snippet.get("displayMessage", ""), "chatimg": author.get("profileImageUrl", ""), "source": "direct"})
+        display_name = str(author.get("displayName", "")).removeprefix("@")
+        await self.handler({"type": "youtube", "id": item.get("id", ""), "userid": author.get("channelId", ""), "chatname": display_name, "username": display_name, "chatmessage": snippet.get("displayMessage", ""), "chatimg": author.get("profileImageUrl", ""), "source": "direct"})
 
     async def send(self, text: str) -> None:
         if not self.oauth.configured:

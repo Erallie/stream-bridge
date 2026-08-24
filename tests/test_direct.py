@@ -114,6 +114,32 @@ class DirectAdapterTests(unittest.TestCase):
         asyncio.run(exercise())
         self.assertEqual(received[0]["chatmessage"], "manual message")
 
+    def test_youtube_removes_leading_at_from_display_name(self) -> None:
+        received = []
+
+        async def handler(payload):
+            received.append(payload)
+
+        async def exercise() -> None:
+            adapter = YouTubeAdapter(handler, Mock())
+            await adapter.parse_message(
+                {
+                    "id": "message-1",
+                    "snippet": {
+                        "type": "textMessageEvent",
+                        "displayMessage": "hello",
+                    },
+                    "authorDetails": {
+                        "channelId": "channel-1",
+                        "displayName": "@Broadcaster",
+                    },
+                }
+            )
+
+        asyncio.run(exercise())
+        self.assertEqual(received[0]["chatname"], "Broadcaster")
+        self.assertEqual(received[0]["username"], "Broadcaster")
+
     def test_youtube_waits_when_the_authorized_account_is_not_live(self) -> None:
         async def handler(payload):
             pass

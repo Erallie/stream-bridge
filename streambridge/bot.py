@@ -30,6 +30,10 @@ def parse_list(value: str | None) -> list[str]:
     return list(dict.fromkeys(x.strip().lower() for x in (value or "").split(",") if x.strip()))
 
 
+def platform_display_name(display_name: str, platform: str) -> str:
+    return display_name.removeprefix("@") if platform.lower() == "youtube" else display_name
+
+
 def webhook_username(display_name: str, platform: str) -> str:
     name = display_name.strip() or "Unknown user"
     combined = f"{name} ({platform.title()})"
@@ -354,13 +358,14 @@ class StreamBridge(commands.Bot):
     async def handle_ssn(self, guild_id: int, data: dict[str, Any]) -> bool:
         message_text = ssn_to_plain_text(str(data.get("plainText") or data.get("chatmessage") or ""))
         display_name = ssn_to_plain_text(str(data.get("chatname") or ""))
+        platform = str(data.get("type", "unknown")).lower()
+        display_name = platform_display_name(display_name, platform)
         data["chatmessage"] = message_text
         data["plainText"] = message_text
         data["chatname"] = display_name
         content_image = str(data.get("contentimg") or "")
         if data.get("reflection") or data.get("bot") or not display_name or not (message_text or content_image):
             return False
-        platform = str(data.get("type", "unknown")).lower()
         tracker = self.ssn_reflections.get(guild_id)
         if tracker and message_text and tracker.consume(platform, message_text):
             logging.info("Suppressed a returning SSN relay echo from %s", platform)

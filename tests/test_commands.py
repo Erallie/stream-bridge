@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("DISCORD_CLIENT_ID", "123456789012345678")
 
-from streambridge.bot import bot, format_discord_status, format_status, webhook_username
+from streambridge.bot import bot, format_discord_status, format_status, platform_display_name, webhook_username
 from streambridge.relay import ReflectionTracker
 
 
@@ -34,6 +34,11 @@ class CommandMetadataTests(unittest.TestCase):
         self.assertEqual(webhook_username("Discord Helper", "kick"), "Dis-cord Helper (Kick)")
         self.assertEqual(webhook_username("Clyde", "youtube"), "C-lyde (Youtube)")
         self.assertLessEqual(len(webhook_username("x" * 100, "twitch")), 80)
+
+    def test_youtube_display_name_drops_only_its_leading_at(self) -> None:
+        self.assertEqual(platform_display_name("@Creator", "youtube"), "Creator")
+        self.assertEqual(platform_display_name("Creator@Home", "youtube"), "Creator@Home")
+        self.assertEqual(platform_display_name("@Creator", "twitch"), "@Creator")
 
     def test_ssn_reflection_trackers_are_isolated_by_discord_server(self) -> None:
         bot.ssn_reflections.pop(1, None)
