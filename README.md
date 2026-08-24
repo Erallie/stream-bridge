@@ -97,7 +97,7 @@ The same saved channel is used for both directions when both are enabled.
 StreamBridge supports two relay methods:
 
 - **Direct mode:** StreamBridge connects directly to Twitch, YouTube, and Kick.
-- **Social Stream Ninja mode:** StreamBridge includes additional streaming platforms and lets SSN handle their relay while the session is available.
+- **Social Stream Ninja mode:** StreamBridge injects Discord messages as native Discord chat events and lets SSN's Relay All system handle platform posting and reflection filtering while the session is available.
 
 If Social Stream Ninja becomes available, StreamBridge can switch to SSN automatically. If SSN goes offline, StreamBridge switches back to its configured direct connections.
 
