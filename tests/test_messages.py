@@ -5,6 +5,7 @@ from streambridge.messages import (
     render_discord_content,
     ssn_to_plain_text,
     to_relay_text,
+    to_ssn_relay_text,
     validate_direct_relay_template,
 )
 
@@ -16,6 +17,15 @@ class MessageTests(unittest.TestCase):
     def test_formats_custom_direct_relay(self) -> None:
         payload = {"chatname": "Alex", "chatmessage": "hello", "type": "youtube"}
         self.assertEqual(to_relay_text(payload, "[{platform}] {name}: {message}"), "[Youtube] Alex: hello")
+
+    def test_ssn_relay_uses_historical_said_format(self) -> None:
+        payload = {
+            "chatname": "Alex",
+            "chatmessage": "hello",
+            "plainText": "hello",
+            "type": "discord",
+        }
+        self.assertEqual(to_ssn_relay_text(payload), "Alex said: hello")
 
     def test_template_requires_message_and_rejects_unknown_fields(self) -> None:
         with self.assertRaisesRegex(ValueError, "must contain"):

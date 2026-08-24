@@ -16,8 +16,9 @@ from streambridge.database import ConfigStore, GuildConfig
 from streambridge.dashboard import DashboardAPI
 from streambridge.direct import DirectHub
 from streambridge.kick import KickGateway
-from streambridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message, validate_direct_relay_template
+from streambridge.messages import DEFAULT_DIRECT_RELAY_TEMPLATE, ssn_to_plain_text, to_relay_text, to_ssn_message, to_ssn_relay_text, validate_direct_relay_template
 from streambridge.oauth import OAuthToken
+from streambridge.relay import ReflectionTracker
 from streambridge.ssn import SsnClient
 from streambridge.youtube import YouTubeGateway
 from streambridge.web import WebGateway
@@ -89,6 +90,7 @@ class StreamBridge(commands.Bot):
         self.direct_hubs: dict[int | str, DirectHub] = {}
         self.workspace_runtime_keys: dict[str, int | str] = {}
         self.webhooks: dict[int, discord.Webhook] = {}
+        self.ssn_reflections: dict[int, ReflectionTracker] = {}
         self.history_task: asyncio.Task[None] | None = None
         self.ssn_url = os.getenv("SSN_WEBSOCKET_URL", "wss://io.socialstream.ninja")
 
@@ -401,6 +403,10 @@ class StreamBridge(commands.Bot):
         content_image = str(data.get("contentimg") or "")
         if data.get("reflection") or data.get("bot") or not display_name or not (message_text or content_image):
             return False
+        tracker = self.ssn_reflections.get(guild_id)
+        if tracker and message_text and tracker.consume(platform, message_text):
+            logging.info("Suppressed a returning SSN relay echo from %s", platform)
+            return False
         user_id = str(data.get("userid") or data.get("chatname", ""))
         key = self.store.claim_event(str(guild_id), platform, str(data.get("id", "")), user_id, message_text or content_image, data.get("timestamp", int(time.time())))
         if not key:
@@ -415,14 +421,6 @@ class StreamBridge(commands.Bot):
         ):
             await self.send_webhook(guild_id, int(config.discord_relay_channel_id), display_name, str(data.get("chatimg", "")), platform, message_text or content_image)
         return True
-
-    async def relay_discord_through_ssn(
-        self,
-        ssn: SsnClient,
-        payload: dict[str, Any],
-    ) -> None:
-        """Inject Discord once and let SSN's Relay All own platform delivery."""
-        await ssn.inject(payload)
 
     async def handle_direct(self, guild_id: int, data: dict[str, Any]) -> None:
         accepted = await self.handle_ssn(guild_id, data)
@@ -467,7 +465,15 @@ class StreamBridge(commands.Bot):
             return
         ssn = self.get_ssn(message.guild.id, config) if config.session_id else None
         if ssn and ssn.connected:
-            await self.relay_discord_through_ssn(ssn, payload)
+            await ssn.inject(payload)
+            relay_text = to_ssn_relay_text(payload)
+            for target in config.relay_targets:
+                if self.store.claim_delivery(guild_id, key, target):
+                    self.ssn_reflections.setdefault(
+                        message.guild.id,
+                        ReflectionTracker(),
+                    ).add(target, relay_text)
+                    await ssn.send_chat(target, relay_text)
         else:
             await self.send_direct(message.guild.id, to_relay_text(payload, self.direct_template(message.guild.id)))
 

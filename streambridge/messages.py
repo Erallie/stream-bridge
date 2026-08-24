@@ -174,3 +174,14 @@ def to_relay_text(payload: dict[str, Any], template: str = DEFAULT_DIRECT_RELAY_
         "platform": str(payload.get("type") or "unknown").title(),
     }
     return template.format_map(values)
+
+
+def to_ssn_relay_text(payload: dict[str, Any]) -> str:
+    """Format an SSN-connected relay the same way StreamBridge historically did."""
+    name = str(payload.get("chatname") or payload.get("username") or "Unknown")
+    message = str(
+        payload.get("plainText")
+        or ssn_to_plain_text(str(payload.get("chatmessage") or ""))
+        or "shared an image"
+    )
+    return f"{name} said: {message}"

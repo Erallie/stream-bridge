@@ -1,24 +1,14 @@
-import asyncio
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 os.environ.setdefault("DISCORD_CLIENT_ID", "123456789012345678")
 
 from streambridge.bot import bot, format_discord_status, format_status, platform_display_name, webhook_username
+from streambridge.relay import ReflectionTracker
 
 
 class CommandMetadataTests(unittest.TestCase):
-    def test_ssn_mode_injects_once_and_does_not_send_platform_chat_itself(self) -> None:
-        ssn = SimpleNamespace(inject=AsyncMock(), send_chat=AsyncMock())
-        payload = {"type": "discord", "chatname": "Alex", "chatmessage": "hello"}
-
-        asyncio.run(bot.relay_discord_through_ssn(ssn, payload))
-
-        ssn.inject.assert_awaited_once_with(payload)
-        ssn.send_chat.assert_not_awaited()
-
     def test_status_labels_remain_bold(self) -> None:
         message = format_status("#chat (forwarding/receiving)", "abc••••••", "connected", "twitch, youtube", "twitch (channel)", "{message}")
 
@@ -49,6 +39,20 @@ class CommandMetadataTests(unittest.TestCase):
         self.assertEqual(platform_display_name("@Creator", "youtube"), "Creator")
         self.assertEqual(platform_display_name("Creator@Home", "youtube"), "Creator@Home")
         self.assertEqual(platform_display_name("@Creator", "twitch"), "@Creator")
+
+    def test_ssn_reflection_trackers_are_isolated_by_discord_server(self) -> None:
+        bot.ssn_reflections.pop(1, None)
+        bot.ssn_reflections.pop(2, None)
+        try:
+            first = bot.ssn_reflections.setdefault(1, ReflectionTracker())
+            second = bot.ssn_reflections.setdefault(2, ReflectionTracker())
+            first.add("youtube", "Alex said: Hello")
+
+            self.assertFalse(second.consume("youtube", "Alex said: Hello"))
+            self.assertTrue(first.consume("youtube", "Alex said: Hello"))
+        finally:
+            bot.ssn_reflections.pop(1, None)
+            bot.ssn_reflections.pop(2, None)
 
     def test_direct_platforms_reports_configured_adapters(self) -> None:
         guild_id = 987654321
