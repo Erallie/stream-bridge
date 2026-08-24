@@ -25,6 +25,7 @@ class SsnClient:
         logger: logging.LoggerAdapter,
         on_message: MessageHandler | None = None,
         on_status: StatusHandler | None = None,
+        reported_connected: bool = False,
     ) -> None:
         self.url = url
         self.http_api_url = self._default_http_api_url(url, session_id)
@@ -34,6 +35,7 @@ class SsnClient:
         self.on_message = on_message
         self.on_status = on_status
         self.connected = False
+        self.reported_connected = reported_connected
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)
         self.stopping = False
         self.task: asyncio.Task[None] | None = None
@@ -46,7 +48,7 @@ class SsnClient:
         return urlunsplit((scheme, parts.netloc, "/" + quote(session_id, safe=""), "", ""))
 
     async def _set_connected(self, connected: bool) -> None:
-        if self.connected == connected:
+        if self.connected == connected and self.reported_connected == connected:
             return
         self.connected = connected
         if connected:
@@ -54,6 +56,9 @@ class SsnClient:
             self.logger.info("SSN host responded; using SSN transport")
         else:
             self.logger.warning("SSN host stopped responding; using direct transport")
+        if self.reported_connected == connected:
+            return
+        self.reported_connected = connected
         if self.on_status:
             await self.on_status(connected)
 

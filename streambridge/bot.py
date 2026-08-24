@@ -165,11 +165,15 @@ class StreamBridge(commands.Bot):
         identities = self.store.dashboard_identities(str(workspace["owner_user_id"]), include_tokens=True)
         return next((item for item in identities if item["provider"] == identity_provider and item["provider_user_id"] == connection["provider_user_id"]), None)
 
-    async def start_workspace(self, workspace: dict[str, Any]) -> None:
+    async def start_workspace(
+        self,
+        workspace: dict[str, Any],
+        ssn_reported_connected: bool = False,
+    ) -> None:
         key = self.workspace_key(workspace)
         self.workspace_runtime_keys[str(workspace["id"])] = key
         if workspace["ssn_session_id"]:
-            self.get_workspace_ssn(workspace)
+            self.get_workspace_ssn(workspace, ssn_reported_connected)
         youtube = self.workspace_identity(workspace, "youtube")
         kick = self.workspace_identity(workspace, "kick")
         twitch = self.workspace_identity(workspace, "twitch")
@@ -227,7 +231,11 @@ class StreamBridge(commands.Bot):
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    def get_workspace_ssn(self, workspace: dict[str, Any]) -> SsnClient:
+    def get_workspace_ssn(
+        self,
+        workspace: dict[str, Any],
+        reported_connected: bool = False,
+    ) -> SsnClient:
         key = self.workspace_key(workspace)
         if key not in self.ssn_clients:
             async def received(data: dict[str, Any]) -> None:
@@ -242,6 +250,7 @@ class StreamBridge(commands.Bot):
             self.ssn_clients[key] = SsnClient(
                 self.ssn_url, str(workspace["ssn_session_id"]), tuple(workspace["ssn_targets"]),
                 logger, received, status if isinstance(key, int) else None,
+                reported_connected,
             )
             self.ssn_clients[key].start()
         return self.ssn_clients[key]
@@ -260,7 +269,9 @@ class StreamBridge(commands.Bot):
     async def reload_workspace(self, workspace_id: str) -> None:
         key = self.workspace_runtime_keys.pop(workspace_id, f"workspace:{workspace_id}")
         existing = self.ssn_clients.pop(key, None)
+        reported_connected = bool(existing and existing.reported_connected)
         if existing:
+            existing.on_status = None
             await existing.close()
         direct = self.direct_hubs.pop(key, None)
         if direct:
@@ -269,7 +280,7 @@ class StreamBridge(commands.Bot):
         self.kick.unregister_account(key)
         workspace = next((item for item in self.store.workspaces() if item["id"] == workspace_id), None)
         if workspace and workspace["enabled"]:
-            await self.start_workspace(workspace)
+            await self.start_workspace(workspace, reported_connected)
 
     async def on_ready(self) -> None:
         logging.info("StreamBridge ready as %s", self.user)
