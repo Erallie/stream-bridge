@@ -172,8 +172,9 @@ class StreamBridge(commands.Bot):
     ) -> None:
         key = self.workspace_key(workspace)
         self.workspace_runtime_keys[str(workspace["id"])] = key
+        ssn = None
         if workspace["ssn_session_id"]:
-            self.get_workspace_ssn(workspace, ssn_reported_connected)
+            ssn = self.get_workspace_ssn(workspace, ssn_reported_connected)
         youtube = self.workspace_identity(workspace, "youtube")
         kick = self.workspace_identity(workspace, "kick")
         twitch = self.workspace_identity(workspace, "twitch")
@@ -210,7 +211,11 @@ class StreamBridge(commands.Bot):
                 twitch_username, youtube_broadcast_detected,
             )
             self.direct_hubs[key] = hub
-            hub.start()
+            hub.start(
+                youtube_polling_enabled=not bool(
+                    ssn and (ssn.connected or ssn_reported_connected)
+                )
+            )
 
     async def handle_workspace_direct(self, workspace: dict[str, Any], data: dict[str, Any]) -> None:
         key = self.workspace_key(workspace)
@@ -244,12 +249,15 @@ class StreamBridge(commands.Bot):
                 else:
                     await self.handle_workspace_message(str(workspace["id"]), data)
             async def status(connected: bool) -> None:
+                hub = self.direct_hubs.get(key)
+                if hub:
+                    await hub.set_youtube_polling_enabled(not connected)
                 if isinstance(key, int):
                     await self.transport_status(key, connected)
             logger = logging.LoggerAdapter(logging.getLogger("streambridge.ssn"), {"workspace_id": workspace["id"]})
             self.ssn_clients[key] = SsnClient(
                 self.ssn_url, str(workspace["ssn_session_id"]), tuple(workspace["ssn_targets"]),
-                logger, received, status if isinstance(key, int) else None,
+                logger, received, status,
                 reported_connected,
             )
             self.ssn_clients[key].start()
@@ -315,6 +323,9 @@ class StreamBridge(commands.Bot):
             async def received(data: dict[str, Any]) -> None:
                 await self.handle_ssn(guild_id, data)
             async def status(connected: bool) -> None:
+                hub = self.direct_hubs.get(guild_id)
+                if hub:
+                    await hub.set_youtube_polling_enabled(not connected)
                 await self.transport_status(guild_id, connected)
             logger = logging.LoggerAdapter(logging.getLogger("streambridge.ssn"), {"guild_id": guild_id})
             self.ssn_clients[guild_id] = SsnClient(self.ssn_url, config.session_id or "", config.relay_targets, logger, received, status)

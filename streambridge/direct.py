@@ -174,6 +174,8 @@ class YouTubeAdapter:
         self.on_broadcast_detected = on_broadcast_detected
         self.session: aiohttp.ClientSession | None = None
         self.waiting_for_broadcast = False
+        self.active_broadcast_id = ""
+        self.announced_broadcast_id = ""
         try:
             self.discovery_interval = max(60, float(os.getenv("YOUTUBE_DISCOVERY_INTERVAL", "300")))
         except ValueError:
@@ -181,7 +183,28 @@ class YouTubeAdapter:
             logging.warning("Invalid YOUTUBE_DISCOVERY_INTERVAL; using 300 seconds")
 
     def start(self) -> None:
-        self.task = asyncio.create_task(self.run(), name="youtube-live-chat")
+        if not self.task or self.task.done():
+            self.task = asyncio.create_task(self.run(), name="youtube-live-chat")
+
+    async def set_polling_enabled(self, enabled: bool) -> None:
+        if enabled:
+            if not self.task or self.task.done():
+                logging.info("Direct YouTube polling resumed because SSN is unavailable")
+                self.start()
+            return
+        if self.task and not self.task.done():
+            logging.info("Direct YouTube polling paused while SSN transport is connected")
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+        self.task = None
+        self.clear_live_broadcast(ended=False)
+
+    def clear_live_broadcast(self, ended: bool) -> None:
+        self.live_chat_id = ""
+        self.page_token = ""
+        self.active_broadcast_id = ""
+        if ended:
+            self.announced_broadcast_id = ""
 
     async def get_session(self) -> aiohttp.ClientSession:
         if not self.session or self.session.closed:
@@ -211,21 +234,22 @@ class YouTubeAdapter:
         for item in body.get("items", []):
             live_chat_id = str(item.get("snippet", {}).get("liveChatId", ""))
             if live_chat_id:
-                if live_chat_id != self.live_chat_id:
+                broadcast_id = str(item.get("id") or live_chat_id)
+                if broadcast_id != self.active_broadcast_id or live_chat_id != self.live_chat_id:
                     self.page_token = ""
                     logging.info("Direct YouTube found the active livestream chat")
-                    self.live_chat_id = live_chat_id
+                self.active_broadcast_id = broadcast_id
+                self.live_chat_id = live_chat_id
+                if broadcast_id != self.announced_broadcast_id:
+                    self.announced_broadcast_id = broadcast_id
                     if self.on_broadcast_detected:
                         try:
                             await self.on_broadcast_detected()
                         except Exception:
                             logging.exception("Could not announce the detected YouTube broadcast")
-                else:
-                    self.live_chat_id = live_chat_id
                 self.waiting_for_broadcast = False
                 return live_chat_id
-        self.live_chat_id = ""
-        self.page_token = ""
+        self.clear_live_broadcast(ended=True)
         if not self.waiting_for_broadcast:
             logging.info("Direct YouTube is enabled; waiting for the authorized channel to go live")
             self.waiting_for_broadcast = True
@@ -247,8 +271,7 @@ class YouTubeAdapter:
                 status, body = await self.request(session, "GET", "https://www.googleapis.com/youtube/v3/liveChat/messages", params=params)
                 if youtube_error_reasons(body) & {"liveChatEnded", "liveChatNotFound"}:
                     logging.info("Direct YouTube livestream ended; waiting for the next active broadcast")
-                    self.live_chat_id = ""
-                    self.page_token = ""
+                    self.clear_live_broadcast(ended=True)
                     self.waiting_for_broadcast = True
                     await asyncio.sleep(self.discovery_interval)
                     continue
@@ -264,8 +287,7 @@ class YouTubeAdapter:
                 return
             except Exception:
                 logging.exception("Direct YouTube polling failed; retrying")
-                self.live_chat_id = ""
-                self.page_token = ""
+                self.clear_live_broadcast(ended=False)
                 await asyncio.sleep(15)
 
     async def parse_message(self, item: dict[str, Any]) -> None:
@@ -290,6 +312,7 @@ class YouTubeAdapter:
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
+            self.task = None
         if self.session and not self.session.closed:
             await self.session.close()
 
@@ -316,9 +339,16 @@ class DirectHub:
                 platform_handler("youtube"), youtube_oauth, on_youtube_broadcast_detected
             )
 
-    def start(self) -> None:
-        for adapter in self.adapters.values():
+    def start(self, youtube_polling_enabled: bool = True) -> None:
+        for platform, adapter in self.adapters.items():
+            if platform == "youtube" and not youtube_polling_enabled:
+                continue
             adapter.start()
+
+    async def set_youtube_polling_enabled(self, enabled: bool) -> None:
+        adapter = self.adapters.get("youtube")
+        if adapter:
+            await adapter.set_polling_enabled(enabled)
 
     async def send(self, text: str, exclude: str = "") -> None:
         destinations = [(platform, adapter) for platform, adapter in self.adapters.items() if platform != exclude]

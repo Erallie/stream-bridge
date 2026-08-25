@@ -43,9 +43,67 @@ class DirectAdapterTests(unittest.TestCase):
             adapter.request = request
             adapter.get_session = lambda: asyncio.sleep(0, result=object())
             await adapter.discover_live_chat()
+            adapter.clear_live_broadcast(ended=False)
             await adapter.discover_live_chat()
             await adapter.discover_live_chat()
             self.assertEqual(detected.await_count, 2)
+
+        asyncio.run(exercise())
+
+    def test_youtube_can_announce_again_after_the_broadcast_ends(self) -> None:
+        async def handler(payload):
+            pass
+
+        async def exercise() -> None:
+            detected = AsyncMock()
+            adapter = YouTubeAdapter(handler, Mock(), detected)
+            responses = iter((
+                {"items": [{"id": "broadcast-1", "snippet": {"liveChatId": "chat-1"}}]},
+                {"items": []},
+                {"items": [{"id": "broadcast-1", "snippet": {"liveChatId": "chat-1"}}]},
+            ))
+
+            async def request(session, method, url, **kwargs):
+                return 200, next(responses)
+
+            adapter.request = request
+            adapter.get_session = lambda: asyncio.sleep(0, result=object())
+            await adapter.discover_live_chat()
+            await adapter.discover_live_chat()
+            await adapter.discover_live_chat()
+            self.assertEqual(detected.await_count, 2)
+
+        asyncio.run(exercise())
+
+    def test_direct_hub_does_not_start_youtube_polling_when_ssn_is_connected(self) -> None:
+        async def handler(payload):
+            pass
+
+        hub = DirectHub(handler)
+        youtube = Mock()
+        hub.adapters = {"youtube": youtube}
+
+        hub.start(youtube_polling_enabled=False)
+
+        youtube.start.assert_not_called()
+
+    def test_direct_hub_pauses_and_resumes_youtube_with_transport(self) -> None:
+        async def handler(payload):
+            pass
+
+        async def exercise() -> None:
+            hub = DirectHub(handler)
+            youtube = Mock()
+            youtube.set_polling_enabled = AsyncMock()
+            hub.adapters = {"youtube": youtube}
+
+            await hub.set_youtube_polling_enabled(False)
+            await hub.set_youtube_polling_enabled(True)
+
+            self.assertEqual(
+                youtube.set_polling_enabled.await_args_list,
+                [unittest.mock.call(False), unittest.mock.call(True)],
+            )
 
         asyncio.run(exercise())
 
