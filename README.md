@@ -424,6 +424,7 @@ From the dashboard, you can:
 - Independently enable messages sent from Discord and messages received in Discord.
 - Customize the message format used for direct platform relay.
 - Choose whether Discord announces switches between SSN and direct relay.
+- Choose whether Discord announces newly detected YouTube live broadcasts.
 - Use StreamBridge without installing it in a Discord server.
 
 Press **Save** after making configuration changes. Changes made through Discord commands also appear in the dashboard.

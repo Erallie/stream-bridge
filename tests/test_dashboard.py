@@ -419,6 +419,7 @@ class DashboardTests(unittest.TestCase):
                 "discord_forward_enabled": False,
                 "discord_receive_enabled": True,
                 "transport_announcements": False,
+                "youtube_live_notifications": False,
                 "ssn_session_id": "session-id",
                 "ssn_targets": ["twitch", "tiktok", "future-platform"],
             }
@@ -437,6 +438,7 @@ class DashboardTests(unittest.TestCase):
         self.assertTrue(self.store.get_setting("123", "discord_enabled"))
         self.assertFalse(self.store.get_setting("123", "discord_forward_enabled"))
         self.assertTrue(self.store.get_setting("123", "discord_receive_enabled"))
+        self.assertFalse(self.store.get_setting("123", "youtube_live_notifications"))
 
     def test_workspace_and_connections_save_with_one_reload(self) -> None:
         user_id = self.store.create_dashboard_user()

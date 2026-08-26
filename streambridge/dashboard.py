@@ -350,6 +350,9 @@ class DashboardAPI:
             workspace["discord_receive_enabled"] = bool(
                 self.store.get_setting(guild_id, "discord_receive_enabled", True)
             ) if guild_id else True
+            workspace["youtube_live_notifications"] = bool(
+                self.store.get_setting(guild_id, "youtube_live_notifications", True)
+            ) if guild_id else True
             if config:
                 workspace["ssn_session_id"] = config.session_id
                 workspace["ssn_targets"] = list(config.relay_targets)
@@ -555,6 +558,7 @@ class DashboardAPI:
                 "discord_forward_enabled": bool(body.get("discord_forward_enabled", True)),
                 "discord_receive_enabled": bool(body.get("discord_receive_enabled", True)),
                 "transport_announcements": bool(body.get("transport_announcements", True)),
+                "youtube_live_notifications": bool(body.get("youtube_live_notifications", True)),
             },
             commit=commit,
         )
