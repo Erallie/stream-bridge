@@ -35,7 +35,7 @@ StreamBridge can connect directly to Twitch, YouTube, and Kick. It can also inte
 
 - **Custom relay templates** — Customize direct relay messages using `{name}`, `{message}`, and `{platform}` placeholders.
 
-- **Discord custom-emote support** — Render Discord custom emotes through Social Stream Ninja and convert them into readable emote names for direct platform relay.
+- **Discord custom-emote support** — Render Discord custom emotes through Social Stream Ninja and relay their names through direct platform connections. Matching a Discord emote's name to a Twitch channel emote lets Twitch recognize it as that emote.
 
 - **Duplicate and echo prevention** — Track message IDs, delivery history, and recently relayed messages to reduce duplicate posts, reflections, and relay loops.
 
@@ -109,11 +109,13 @@ Messages posted through a user-authorized Twitch or YouTube broadcaster account 
 
 ## Discord custom emotes
 
-StreamBridge supports relaying Discord custom emotes across connected chats so they can remain recognizable when messages move between Discord and streaming platforms.
+StreamBridge supports relaying Discord custom emotes across connected chats so they remain recognizable when messages move between Discord and streaming platforms.
 
-Custom emotes are preserved in a form that allows connected platforms and chat integrations to display them appropriately instead of showing Discord’s raw internal emote syntax.
+When StreamBridge uses direct relay, it removes Discord's internal emote syntax and sends the emote's name as chat text. For example, `<:erallieHeart:1529884213434777742>` is relayed as `erallieHeart`.
 
-This helps Discord messages look more natural when they are relayed into Twitch, YouTube, Kick, and other supported chats.
+If you give a Discord emote the same name as one of your Twitch channel emotes, Twitch can recognize the relayed name and display the corresponding Twitch emote. Emotes with different names are still relayed as readable text, but they are not automatically matched to a differently named Twitch emote.
+
+When StreamBridge is relaying through Social Stream Ninja, SSN receives the Discord emote data for use by compatible SSN outputs and overlays.
 
 ## Custom relay messages
 
