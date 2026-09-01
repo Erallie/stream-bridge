@@ -350,7 +350,12 @@ class DirectHub:
         if adapter:
             await adapter.set_polling_enabled(enabled)
 
-    async def send(self, text: str, exclude: str = "") -> None:
+    async def send(
+        self,
+        text: str,
+        exclude: str = "",
+        reflection_aliases: tuple[str, ...] = (),
+    ) -> set[str]:
         destinations = [(platform, adapter) for platform, adapter in self.adapters.items() if platform != exclude]
         outbound = {
             platform: text[:200] if platform == "youtube" else text[:500]
@@ -358,14 +363,24 @@ class DirectHub:
         }
         for platform, relay_text in outbound.items():
             self.reflections.add(platform, relay_text)
+            for alias in reflection_aliases:
+                if alias:
+                    self.reflections.add(platform, alias[:200] if platform == "youtube" else alias[:500])
         results = await asyncio.gather(
             *(adapter.send(outbound[platform]) for platform, adapter in destinations),
             return_exceptions=True,
         )
+        succeeded: set[str] = set()
         for (platform, _), result in zip(destinations, results, strict=True):
             if isinstance(result, Exception):
                 self.reflections.discard(platform, outbound[platform])
+                for alias in reflection_aliases:
+                    if alias:
+                        self.reflections.discard(platform, alias[:200] if platform == "youtube" else alias[:500])
                 logging.error("Direct %s send failed: %s", platform, result)
+            else:
+                succeeded.add(platform)
+        return succeeded
 
     async def close(self) -> None:
         await asyncio.gather(*(adapter.close() for adapter in self.adapters.values()), return_exceptions=True)

@@ -261,6 +261,30 @@ class DirectAdapterTests(unittest.TestCase):
 
         asyncio.run(exercise())
 
+    def test_reflections_also_track_ssn_formatted_aliases(self) -> None:
+        class Adapter:
+            async def send(self, text: str) -> None:
+                return None
+
+        async def handler(payload):
+            pass
+
+        async def exercise() -> None:
+            hub = DirectHub(handler)
+            hub.adapters = {"twitch": Adapter(), "youtube": Adapter()}
+            alias = "Alice said: " + ("x" * 600)
+
+            succeeded = await hub.send(
+                "Alice: hello (from Discord)",
+                reflection_aliases=(alias,),
+            )
+
+            self.assertEqual(succeeded, {"twitch", "youtube"})
+            self.assertTrue(hub.reflections.consume("twitch", alias[:500]))
+            self.assertTrue(hub.reflections.consume("youtube", alias[:200]))
+
+        asyncio.run(exercise())
+
 
 if __name__ == "__main__":
     unittest.main()

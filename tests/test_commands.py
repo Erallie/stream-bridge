@@ -1,3 +1,4 @@
+import asyncio
 import os
 import unittest
 from types import SimpleNamespace
@@ -53,6 +54,32 @@ class CommandMetadataTests(unittest.TestCase):
         finally:
             bot.ssn_reflections.pop(1, None)
             bot.ssn_reflections.pop(2, None)
+
+    def test_direct_send_tracks_direct_and_ssn_versions_for_ssn_input(self) -> None:
+        guild_id = 987654320
+
+        class Hub:
+            adapters = {"twitch": object()}
+
+            async def send(self, text, exclude, reflection_aliases):
+                return {"twitch"}
+
+        bot.direct_hubs[guild_id] = Hub()
+        bot.ssn_reflections.pop(guild_id, None)
+        try:
+            asyncio.run(
+                bot.send_direct(
+                    guild_id,
+                    "Alice: hello (from Discord)",
+                    reflection_aliases=("Alice said: hello",),
+                )
+            )
+            tracker = bot.ssn_reflections[guild_id]
+            self.assertTrue(tracker.consume("twitch", "Alice: hello (from Discord)"))
+            self.assertTrue(tracker.consume("twitch", "Alice said: hello"))
+        finally:
+            bot.direct_hubs.pop(guild_id, None)
+            bot.ssn_reflections.pop(guild_id, None)
 
     def test_direct_platforms_reports_configured_adapters(self) -> None:
         guild_id = 987654321

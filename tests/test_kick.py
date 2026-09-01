@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 import unittest
@@ -31,6 +32,27 @@ class KickGatewayTests(unittest.TestCase):
             self.assertEqual(gateway.username(42), "Alice")
             gateway.unregister_account(42)
             self.assertFalse(gateway.connected(42))
+            store.close()
+
+    def test_send_tracks_ssn_formatted_reflection_alias(self) -> None:
+        class Account:
+            async def send(self, text: str) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = ConfigStore(str(Path(directory) / "bot.sqlite"))
+            gateway = KickGateway(store, ignore_event)
+            gateway.accounts[42] = Account()
+
+            async def exercise() -> None:
+                await gateway.send(
+                    42,
+                    "Alice: hello (from Discord)",
+                    ("Alice said: hello",),
+                )
+
+            asyncio.run(exercise())
+            self.assertTrue(gateway.reflections[42].consume("kick", "Alice said: hello"))
             store.close()
 
 

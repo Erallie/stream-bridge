@@ -31,3 +31,28 @@ class SsnClientTests(unittest.TestCase):
 
         asyncio.run(exercise())
         self.assertEqual(changes, [True, False])
+
+    def test_transient_probe_failures_do_not_disconnect_ssn(self) -> None:
+        changes: list[bool] = []
+
+        async def status(connected: bool) -> None:
+            changes.append(connected)
+
+        async def exercise() -> None:
+            client = self.make_client(status)
+            failures = await client._record_probe_result(True, 0, 3)
+            failures = await client._record_probe_result(False, failures, 3)
+            failures = await client._record_probe_result(False, failures, 3)
+            self.assertTrue(client.connected)
+            self.assertEqual(changes, [True])
+
+            failures = await client._record_probe_result(False, failures, 3)
+            self.assertFalse(client.connected)
+            self.assertEqual(changes, [True, False])
+
+            failures = await client._record_probe_result(True, failures, 3)
+            self.assertEqual(failures, 0)
+            self.assertTrue(client.connected)
+            self.assertEqual(changes, [True, False, True])
+
+        asyncio.run(exercise())

@@ -34,7 +34,7 @@ class SsnClient:
         self.logger = logger
         self.on_message = on_message
         self.on_status = on_status
-        self.connected = False
+        self.connected = reported_connected
         self.reported_connected = reported_connected
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)
         self.stopping = False
@@ -102,9 +102,35 @@ class SsnClient:
                 except Exception:
                     self.logger.exception("Failed to process SSN message")
 
+    async def _record_probe_result(
+        self,
+        host_available: bool,
+        consecutive_failures: int,
+        failure_threshold: int,
+    ) -> int:
+        if host_available:
+            await self._set_connected(True)
+            return 0
+        consecutive_failures = min(failure_threshold, consecutive_failures + 1)
+        if self.connected and consecutive_failures < failure_threshold:
+            self.logger.warning(
+                "SSN host missed presence check %d of %d; keeping SSN transport active",
+                consecutive_failures,
+                failure_threshold,
+            )
+        else:
+            await self._set_connected(False)
+        return consecutive_failures
+
     async def _probe_host(self) -> None:
         interval = max(5.0, float(os.getenv("SSN_HOST_PROBE_INTERVAL", "15")))
         timeout = max(3.0, float(os.getenv("SSN_HOST_PROBE_TIMEOUT", "10")))
+        try:
+            failure_threshold = max(1, int(os.getenv("SSN_HOST_PROBE_FAILURES", "3")))
+        except ValueError:
+            failure_threshold = 3
+            self.logger.warning("Invalid SSN_HOST_PROBE_FAILURES; using 3")
+        consecutive_failures = 0
         client_timeout = aiohttp.ClientTimeout(total=timeout)
         async with aiohttp.ClientSession(timeout=client_timeout) as session:
             while not self.stopping:
@@ -116,8 +142,12 @@ class SsnClient:
                         host_available = response.status < 400 and isinstance(result, dict)
                 except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError):
                     host_available = False
-                await self._set_connected(host_available)
-                if not host_available and not self.host_wait_logged:
+                consecutive_failures = await self._record_probe_result(
+                    host_available,
+                    consecutive_failures,
+                    failure_threshold,
+                )
+                if not self.connected and not self.host_wait_logged:
                     self.logger.warning(
                         "SSN relay is reachable, but the SSN host did not answer; using direct transport and continuing to check"
                     )

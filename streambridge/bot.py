@@ -228,11 +228,13 @@ class StreamBridge(commands.Bot):
         if not event:
             return
         relay_text = to_relay_text(data, str(workspace["relay_template"]))
+        ssn_relay_text = to_ssn_relay_text(data)
         source = str(data.get("type", ""))
         hub = self.direct_hubs.get(key)
-        tasks: list[Any] = [hub.send(relay_text, source)] if hub else []
+        reflection_aliases = (ssn_relay_text,)
+        tasks: list[Any] = [hub.send(relay_text, source, reflection_aliases)] if hub else []
         if source != "kick" and self.kick.connected(key):
-            tasks.append(self.kick.send(key, relay_text))
+            tasks.append(self.kick.send(key, relay_text, reflection_aliases))
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -345,15 +347,35 @@ class StreamBridge(commands.Bot):
         if not client or not client.connected:
             await self.handle_direct(guild_id, data)
 
-    async def send_direct(self, guild_id: int, text: str, exclude: str = "") -> None:
+    async def send_direct(
+        self,
+        guild_id: int,
+        text: str,
+        exclude: str = "",
+        reflection_aliases: tuple[str, ...] = (),
+    ) -> None:
         hub = self.direct_hubs.get(guild_id)
-        tasks = [hub.send(text, exclude)] if hub else []
+        tasks: list[tuple[str, Any]] = []
+        if hub:
+            tasks.append(("hub", hub.send(text, exclude, reflection_aliases)))
         if exclude != "kick" and self.kick.connected(guild_id):
-            tasks.append(self.kick.send(guild_id, text))
-        results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
-        for result in results:
+            tasks.append(("kick", self.kick.send(guild_id, text, reflection_aliases)))
+        results = await asyncio.gather(*(task for _, task in tasks), return_exceptions=True) if tasks else []
+        reflected_platforms: set[str] = set()
+        for (kind, _), result in zip(tasks, results, strict=True):
             if isinstance(result, Exception):
                 logging.error("Direct relay send failed: %s", result)
+            elif kind == "hub":
+                if isinstance(result, set):
+                    reflected_platforms.update(result)
+            elif kind == "kick":
+                reflected_platforms.add("kick")
+        tracker = self.ssn_reflections.setdefault(guild_id, ReflectionTracker())
+        for platform in reflected_platforms:
+            limit = 200 if platform == "youtube" else 500
+            for reflection_text in (text, *reflection_aliases):
+                if reflection_text:
+                    tracker.add(platform, reflection_text[:limit])
 
     def direct_platforms(self, guild_id: int) -> list[str]:
         hub = self.direct_hubs.get(guild_id)
@@ -436,7 +458,12 @@ class StreamBridge(commands.Bot):
     async def handle_direct(self, guild_id: int, data: dict[str, Any]) -> None:
         accepted = await self.handle_ssn(guild_id, data)
         if accepted:
-            await self.send_direct(guild_id, to_relay_text(data, self.direct_template(guild_id)), str(data.get("type", "")))
+            await self.send_direct(
+                guild_id,
+                to_relay_text(data, self.direct_template(guild_id)),
+                str(data.get("type", "")),
+                (to_ssn_relay_text(data),),
+            )
 
     async def send_webhook(self, guild_id: int, channel_id: int, display_name: str, avatar_url: str, platform: str, content: str) -> None:
         guild = self.get_guild(guild_id)
@@ -486,7 +513,11 @@ class StreamBridge(commands.Bot):
                     ).add(target, relay_text)
                     await ssn.send_chat(target, relay_text)
         else:
-            await self.send_direct(message.guild.id, to_relay_text(payload, self.direct_template(message.guild.id)))
+            await self.send_direct(
+                message.guild.id,
+                to_relay_text(payload, self.direct_template(message.guild.id)),
+                reflection_aliases=(to_ssn_relay_text(payload),),
+            )
 
     async def close(self) -> None:
         if self.history_task:

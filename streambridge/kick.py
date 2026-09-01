@@ -175,16 +175,27 @@ class KickGateway:
             await self.handler(key, dict(data))
         return web.Response(status=204)
 
-    async def send(self, key: RuntimeKey, text: str) -> None:
+    async def send(
+        self,
+        key: RuntimeKey,
+        text: str,
+        reflection_aliases: tuple[str, ...] = (),
+    ) -> None:
         account = self.accounts.get(key)
         if not account:
             return
         outbound = text[:500]
         self.reflections[key].add("kick", outbound)
+        for alias in reflection_aliases:
+            if alias:
+                self.reflections[key].add("kick", alias[:500])
         try:
             await account.send(outbound)
         except Exception:
             self.reflections[key].discard("kick", outbound)
+            for alias in reflection_aliases:
+                if alias:
+                    self.reflections[key].discard("kick", alias[:500])
             raise
 
     def connected(self, key: RuntimeKey) -> bool:
