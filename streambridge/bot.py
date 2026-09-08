@@ -34,6 +34,15 @@ def platform_display_name(display_name: str, platform: str) -> str:
     return display_name.removeprefix("@") if platform.lower() == "youtube" else display_name
 
 
+def is_ssn_host_message(data: dict[str, Any]) -> bool:
+    """Return whether SSN identifies a message as authored from its host controls."""
+    return bool(
+        data.get("host")
+        or data.get("hostReflection")
+        or str(data.get("reflectionOrigin") or "").casefold() == "host"
+    )
+
+
 def webhook_username(display_name: str, platform: str) -> str:
     name = display_name.strip() or "Unknown user"
     combined = f"{name} ({platform.title()})"
@@ -434,7 +443,13 @@ class StreamBridge(commands.Bot):
         data["plainText"] = message_text
         data["chatname"] = display_name
         content_image = str(data.get("contentimg") or "")
-        if data.get("reflection") or data.get("bot") or not display_name or not (message_text or content_image):
+        host_message = is_ssn_host_message(data)
+        if (
+            (data.get("reflection") and not host_message)
+            or (data.get("bot") and not host_message)
+            or not display_name
+            or not (message_text or content_image)
+        ):
             return False
         tracker = self.ssn_reflections.get(guild_id)
         if tracker and message_text and tracker.consume(platform, message_text):

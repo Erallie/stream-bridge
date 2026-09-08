@@ -2,10 +2,11 @@ import asyncio
 import os
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault("DISCORD_CLIENT_ID", "123456789012345678")
 
-from streambridge.bot import bot, format_discord_status, format_status, platform_display_name, webhook_username
+from streambridge.bot import bot, format_discord_status, format_status, is_ssn_host_message, platform_display_name, webhook_username
 from streambridge.relay import ReflectionTracker
 
 
@@ -40,6 +41,40 @@ class CommandMetadataTests(unittest.TestCase):
         self.assertEqual(platform_display_name("@Creator", "youtube"), "Creator")
         self.assertEqual(platform_display_name("Creator@Home", "youtube"), "Creator@Home")
         self.assertEqual(platform_display_name("@Creator", "twitch"), "@Creator")
+
+    def test_ssn_host_reflections_are_recognized(self) -> None:
+        self.assertTrue(is_ssn_host_message({"reflection": True, "hostReflection": True}))
+        self.assertTrue(is_ssn_host_message({"reflection": True, "reflectionOrigin": "HOST"}))
+        self.assertTrue(is_ssn_host_message({"host": True, "bot": True}))
+
+    def test_ordinary_ssn_reflections_and_bots_are_not_host_messages(self) -> None:
+        self.assertFalse(is_ssn_host_message({"reflection": True}))
+        self.assertFalse(is_ssn_host_message({"bot": True}))
+
+    def test_ssn_host_reflection_is_accepted_for_discord_delivery(self) -> None:
+        message = {
+            "id": "host-message-1",
+            "type": "twitch",
+            "chatname": "Broadcaster",
+            "chatmessage": "Sent from the SSN panel",
+            "reflection": True,
+            "hostReflection": True,
+        }
+        with (
+            patch.object(bot.store, "claim_event", return_value="event-key"),
+            patch.object(bot.store, "get", return_value=None),
+        ):
+            self.assertTrue(asyncio.run(bot.handle_ssn(987654323, message)))
+
+    def test_ordinary_ssn_reflection_remains_filtered(self) -> None:
+        message = {
+            "id": "relay-echo-1",
+            "type": "twitch",
+            "chatname": "Relay account",
+            "chatmessage": "Returning relay echo",
+            "reflection": True,
+        }
+        self.assertFalse(asyncio.run(bot.handle_ssn(987654324, message)))
 
     def test_ssn_reflection_trackers_are_isolated_by_discord_server(self) -> None:
         bot.ssn_reflections.pop(1, None)
