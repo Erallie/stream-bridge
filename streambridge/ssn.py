@@ -47,6 +47,14 @@ class SsnClient:
         scheme = "https" if parts.scheme == "wss" else "http"
         return urlunsplit((scheme, parts.netloc, "/" + quote(session_id, safe=""), "", ""))
 
+    def _presence_payload(self) -> dict[str, Any]:
+        return {
+            "action": "getHype",
+            "get": "streambridge-presence",
+            "out": 3,
+            "apiid": self.session_id,
+        }
+
     async def _set_connected(self, connected: bool) -> None:
         if self.connected == connected and self.reported_connected == connected:
             return
@@ -134,10 +142,14 @@ class SsnClient:
         client_timeout = aiohttp.ClientTimeout(total=timeout)
         async with aiohttp.ClientSession(timeout=client_timeout) as session:
             while not self.stopping:
-                payload: dict[str, Any] = {"action": "getHype", "get": "streambridge-presence"}
+                payload = self._presence_payload()
                 host_available = False
                 try:
-                    async with session.post(self.http_api_url, json=payload) as response:
+                    async with session.post(
+                        self.http_api_url,
+                        params={"channel": "3"},
+                        json=payload,
+                    ) as response:
                         result = await response.json(content_type=None)
                         host_available = response.status < 400 and isinstance(result, dict)
                 except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError):

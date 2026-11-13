@@ -17,6 +17,7 @@ from aiohttp import web
 from cryptography.fernet import Fernet
 
 from streambridge.database import ConfigStore
+from streambridge.messages import validate_direct_relay_template
 
 WorkspaceChanged = Callable[[str], Awaitable[None]]
 IdentityLinked = Callable[[str, dict[str, str]], Awaitable[None]]
@@ -377,9 +378,13 @@ class DashboardAPI:
 
     async def validate_workspace(self, user_id: str, body: dict[str, Any]) -> None:
         template = str(body.get("relay_template", ""))
-        for placeholder in ("{name}", "{message}", "{platform}"):
-            if placeholder not in template:
-                raise web.HTTPBadRequest(text=json.dumps({"error": f"Relay template must contain {placeholder}"}), content_type="application/json")
+        try:
+            validate_direct_relay_template(template)
+        except ValueError as error:
+            raise web.HTTPBadRequest(
+                text=json.dumps({"error": str(error)}),
+                content_type="application/json",
+            ) from error
         targets = body.get("ssn_targets", [])
         if not isinstance(targets, list) or any(
             not isinstance(value, str) or not value.strip() or len(value) > 40

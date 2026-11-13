@@ -16,6 +16,19 @@ class SsnClientTests(unittest.TestCase):
             "https://io.socialstream.ninja/my%20session",
         )
 
+    def test_presence_probe_targets_the_ssn_dock_connection(self) -> None:
+        client = self.make_client()
+
+        self.assertEqual(
+            client._presence_payload(),
+            {
+                "action": "getHype",
+                "get": "streambridge-presence",
+                "out": 3,
+                "apiid": "session",
+            },
+        )
+
     def test_status_handler_runs_only_when_transport_changes(self) -> None:
         changes: list[bool] = []
 

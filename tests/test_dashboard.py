@@ -409,6 +409,21 @@ class DashboardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already has a bridge"):
             self.store.save_workspace(user_id, body)
 
+    def test_workspace_relay_template_does_not_require_platform(self) -> None:
+        dashboard = DashboardAPI(self.store)
+        user_id = self.store.create_dashboard_user()
+
+        asyncio.run(
+            dashboard.validate_workspace(
+                user_id,
+                {
+                    "relay_template": "{name} said: {message}",
+                    "ssn_targets": [],
+                    "discord_enabled": False,
+                },
+            )
+        )
+
     def test_applies_complete_discord_configuration(self) -> None:
         dashboard = DashboardAPI(self.store)
         dashboard.apply_discord_configuration(
